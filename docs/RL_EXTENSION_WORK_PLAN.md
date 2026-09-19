@@ -184,9 +184,10 @@ passed Gate 1, full artifact-integrity verification, split reconciliation, and
 pair-lifecycle reconciliation. See
 [`TRACE_CAMPAIGN_VALIDATION.md`](TRACE_CAMPAIGN_VALIDATION.md). Phase 2
 implementation began on 2026-09-19 with the verified chronological reader and
-lifecycle types in `hybrid_v2x_rl.mean_field.frames`. The remaining unchecked
-task is the campaign-wide source-to-frame reconciliation and its persisted
-validation report.
+lifecycle types in `hybrid_v2x_rl.mean_field.frames`. It completed on
+2026-09-19 after all 21 configured traces passed source-to-frame reconciliation
+and immutable compact caches were published. See
+[`PHASE2_FRAME_REPLAY_VALIDATION.md`](PHASE2_FRAME_REPLAY_VALIDATION.md).
 
 ### Objective
 
@@ -204,7 +205,7 @@ An episode-grouped, one-pair-at-a-time cache loses simultaneous population struc
 - [x] Represent pair births, continuing pairs, natural terminations, and trace truncations explicitly.
 - [x] Keep train, validation, and test trace membership immutable.
 - [x] Make replay deterministic under a fixed seed and configuration.
-- [ ] Validate source counts: records, frames, unique pairs, births, terminations, and densities.
+- [x] Validate source counts: records, frames, unique pairs, births, terminations, and densities.
 - [x] Add small synthetic fixtures that test asynchronous births and variable population sizes.
 
 ### Safe precomputation
@@ -634,7 +635,8 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-The chronological population-frame reader, lifecycle structures, immutable
-split catalog, asynchronous-birth fixtures, and deterministic replay tests are
-implemented. Run campaign-wide source-to-frame validation, persist its report,
-and freeze the Phase 2 cache format before advancing to Phase 3.
+Phase 2 is complete: the chronological population-frame reader, lifecycle
+structures, immutable split catalog, deterministic fixtures, compact cache
+format `1.0.0`, and 21-trace source-to-cache validation are implemented and
+verified. Begin Phase 3 with the single authoritative nine-action-to-resource
+mapping, then build the population action ledger on that mapping.

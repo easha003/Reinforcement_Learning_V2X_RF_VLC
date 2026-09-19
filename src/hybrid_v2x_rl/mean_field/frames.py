@@ -19,10 +19,13 @@ import math
 import re
 from collections import Counter
 from collections.abc import Iterator, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
+import numpy as np
+import pyarrow as pa  # type: ignore[import-untyped]
+import pyarrow.compute as pc  # type: ignore[import-untyped]
 import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
 from hybrid_v2x_rl.config.models import TraceSplitConfig
@@ -234,7 +237,12 @@ class PopulationFrame:
     time_s: float
     vehicles: tuple[VehicleTraceRecord, ...]
     pairs: tuple[PopulationPair, ...]
-    spatial_index: SpatialIndex
+    _spatial_index: SpatialIndex | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if self.index < 0:
@@ -281,6 +289,16 @@ class PopulationFrame:
     @property
     def active_pair_ids(self) -> tuple[str, ...]:
         return tuple(pair.pair_id for pair in self.pairs)
+
+    @property
+    def spatial_index(self) -> SpatialIndex:
+        """Build the neighbour index only when downstream physics requests it."""
+
+        index = self._spatial_index
+        if index is None:
+            index = SpatialIndex.build(self.vehicles)
+            object.__setattr__(self, "_spatial_index", index)
+        return index
 
     @property
     def endpoint_multiplicities(self) -> tuple[tuple[str, int], ...]:
@@ -348,7 +366,32 @@ class FrameReplayReport:
 
 
 @dataclass(frozen=True, slots=True)
-class _ScheduledEpisode:
+class FrameAggregate:
+    """Policy-independent population and lifecycle counts for one frame."""
+
+    frame_index: int
+    time_s: float
+    active_pairs: int
+    births: int
+    continuing_pairs: int
+    natural_terminations: int
+    internal_truncations: int
+    trace_end_truncations: int
+    shared_endpoints: int
+    pairs_with_shared_endpoint: int
+    overlapping_endpoint_assignments: int
+    max_endpoint_multiplicity: int
+
+    def as_dict(self) -> dict[str, object]:
+        """Return a row compatible with the frozen cache schema."""
+
+        return cast(dict[str, object], asdict(self))
+
+
+@dataclass(frozen=True, slots=True)
+class PairEpisodeSchedule:
+    """Policy-independent interval that reconstructs one pair's active frames."""
+
     segment: TaggedPairSegment
     first_frame: int
     last_frame: int
@@ -377,7 +420,7 @@ def _load_pair_schedule(
     source: FrameTraceSource,
     period_s: float,
     last_frame: int,
-) -> tuple[tuple[_ScheduledEpisode, ...], _PairSourceStats]:
+) -> tuple[tuple[PairEpisodeSchedule, ...], _PairSourceStats]:
     columns = [
         "trace_id",
         "pair_id",
@@ -395,7 +438,7 @@ def _load_pair_schedule(
         reader.artifact.path / "pairs.parquet",
         columns=columns,
     ).to_pylist()
-    scheduled: list[_ScheduledEpisode] = []
+    scheduled: list[PairEpisodeSchedule] = []
     seen: set[str] = set()
     zero_duration = 0
     no_decision = 0
@@ -462,7 +505,7 @@ def _load_pair_schedule(
             no_decision += 1
             continue
         scheduled.append(
-            _ScheduledEpisode(segment=segment, first_frame=first, last_frame=final)
+            PairEpisodeSchedule(segment=segment, first_frame=first, last_frame=final)
         )
     scheduled.sort(key=lambda item: (item.first_frame, item.segment.pair_id))
     return (
@@ -502,6 +545,63 @@ def _iter_vehicle_frames(
         current.append(vehicle)
     if current_time is not None:
         yield current_time, tuple(sorted(current, key=lambda item: item.vehicle_id))
+
+
+def _iter_decision_vehicle_ids(
+    reader: MobilityTraceReader,
+    *,
+    period_s: float,
+    last_frame: int,
+) -> Iterator[tuple[int, frozenset[str]]]:
+    """Scan only time and identity columns for fast campaign validation."""
+
+    origin_s = reader.report.first_time_s
+    current_frame: int | None = None
+    current_ids: set[str] = set()
+    previous_time: float | None = None
+    for path in reader.vehicle_part_paths:
+        parquet = pq.ParquetFile(path)
+        for batch in parquet.iter_batches(columns=("time_s", "vehicle_id")):
+            times = batch.column(batch.schema.get_field_index("time_s")).to_numpy(
+                zero_copy_only=False
+            )
+            if len(times) == 0:
+                continue
+            if previous_time is not None and times[0] < previous_time - _TIME_TOLERANCE_S:
+                raise FrameReplayError("vehicle records are not chronological")
+            if len(times) > 1 and bool(np.any(np.diff(times) < -_TIME_TOLERANCE_S)):
+                raise FrameReplayError("vehicle records are not chronological")
+            previous_time = float(times[-1])
+            coordinates = (times - origin_s) / period_s
+            nearest = np.rint(coordinates).astype(np.int64)
+            at_decision = (
+                (nearest >= 0)
+                & (nearest <= last_frame)
+                & (np.abs(times - (origin_s + nearest * period_s)) <= _TIME_TOLERANCE_S)
+            )
+            if not bool(np.any(at_decision)):
+                continue
+            identifiers = pc.filter(
+                batch.column(batch.schema.get_field_index("vehicle_id")),
+                pa.array(at_decision),
+            ).to_pylist()
+            for raw_frame, raw_id in zip(nearest[at_decision], identifiers, strict=True):
+                frame_index = int(raw_frame)
+                vehicle_id = str(raw_id)
+                if current_frame is None:
+                    current_frame = frame_index
+                elif frame_index != current_frame:
+                    yield current_frame, frozenset(current_ids)
+                    current_frame = frame_index
+                    current_ids = set()
+                if vehicle_id in current_ids:
+                    raise FrameReplayError(
+                        "a population frame cannot contain duplicate vehicles",
+                        context={"frame_index": frame_index, "vehicle_id": vehicle_id},
+                    )
+                current_ids.add(vehicle_id)
+    if current_frame is not None:
+        yield current_frame, frozenset(current_ids)
 
 
 class PopulationFrameReader:
@@ -556,7 +656,7 @@ class PopulationFrameReader:
             period_s=self.generation_period_s,
             last_frame=self.last_frame_index,
         )
-        starts: dict[int, list[_ScheduledEpisode]] = {}
+        starts: dict[int, list[PairEpisodeSchedule]] = {}
         for episode in self._episodes:
             starts.setdefault(episode.first_frame, []).append(episode)
         self._starts = {
@@ -572,9 +672,15 @@ class PopulationFrameReader:
     def decision_pair_episodes(self) -> int:
         return len(self._episodes)
 
+    @property
+    def episode_schedule(self) -> tuple[PairEpisodeSchedule, ...]:
+        """Return the frozen, policy-independent episode interval schedule."""
+
+        return self._episodes
+
     def _lifecycle(
         self,
-        episode: _ScheduledEpisode,
+        episode: PairEpisodeSchedule,
         *,
         frame_index: int,
     ) -> PairLifecycle:
@@ -599,7 +705,7 @@ class PopulationFrameReader:
         frame_index: int,
         time_s: float,
         vehicles: tuple[VehicleTraceRecord, ...],
-        active: dict[str, _ScheduledEpisode],
+        active: dict[str, PairEpisodeSchedule],
     ) -> PopulationFrame:
         for episode in self._starts.get(frame_index, ()):
             pair_id = episode.segment.pair_id
@@ -656,7 +762,6 @@ class PopulationFrameReader:
             time_s=time_s,
             vehicles=vehicles,
             pairs=tuple(pairs),
-            spatial_index=SpatialIndex.build(vehicles),
         )
 
     def iter_frames(self, *, max_frames: int | None = None) -> Iterator[PopulationFrame]:
@@ -666,7 +771,7 @@ class PopulationFrameReader:
             not isinstance(max_frames, int) or isinstance(max_frames, bool) or max_frames <= 0
         ):
             raise ValueError("max_frames must be a positive integer or None")
-        active: dict[str, _ScheduledEpisode] = {}
+        active: dict[str, PairEpisodeSchedule] = {}
         next_index = 0
         for time_s, vehicles in _iter_vehicle_frames(self.trace):
             expected = (
@@ -713,7 +818,15 @@ class PopulationFrameReader:
     def validate(self) -> FrameReplayReport:
         """Replay the full trace and reconcile source, lifecycle, and overlap counts."""
 
-        frames = 0
+        report, _ = self.validate_with_aggregates()
+        return report
+
+    def validate_with_aggregates(
+        self,
+    ) -> tuple[FrameReplayReport, tuple[FrameAggregate, ...]]:
+        """Validate once and also return compact per-frame aggregate rows."""
+
+        frames = self.decision_frame_count
         nonempty = 0
         pair_instances = 0
         births = 0
@@ -725,58 +838,123 @@ class PopulationFrameReader:
         overlap_pairs = 0
         overlap_assignments = 0
         max_multiplicity = 0
-        born_ids: set[str] = set()
-        final_ids: set[str] = set()
-        for frame in self.iter_frames():
-            if frame.index != frames:
-                raise FrameReplayError("population frame indices are not contiguous")
-            frames += 1
-            nonempty += bool(frame.pairs)
-            pair_instances += len(frame.pairs)
-            overlap = frame.shared_endpoint_ids
-            if overlap:
-                overlap_frames += 1
-                overlap_pairs += frame.pairs_with_shared_endpoint
-                overlap_assignments += frame.overlapping_endpoint_assignments
-            if frame.endpoint_multiplicities:
-                max_multiplicity = max(
-                    max_multiplicity,
-                    max(count for _, count in frame.endpoint_multiplicities),
-                )
-            for pair in frame.pairs:
-                lifecycle = pair.lifecycle
-                if lifecycle.born:
-                    if pair.pair_id in born_ids:
-                        raise FrameReplayError("pair emitted more than one birth")
-                    born_ids.add(pair.pair_id)
-                    births += 1
-                else:
-                    if pair.pair_id not in born_ids:
-                        raise FrameReplayError("continuing pair has no prior birth")
-                    continuing += 1
-                if lifecycle.final:
-                    if pair.pair_id in final_ids:
-                        raise FrameReplayError("pair emitted more than one final event")
-                    final_ids.add(pair.pair_id)
-                    if lifecycle.terminated:
-                        natural += 1
-                    elif lifecycle.end_reason == "max_duration":
-                        internal += 1
-                    else:
-                        trace_end += 1
-        expected_ids = {episode.segment.pair_id for episode in self._episodes}
-        if born_ids != expected_ids or final_ids != expected_ids:
-            raise FrameReplayError(
-                "source pair episodes do not reconcile with lifecycle events",
-                context={
-                    "missing_births": sorted(expected_ids - born_ids),
-                    "missing_finals": sorted(expected_ids - final_ids),
-                    "unexpected_births": sorted(born_ids - expected_ids),
-                    "unexpected_finals": sorted(final_ids - expected_ids),
-                },
+        aggregates: list[FrameAggregate] = []
+        active: dict[str, PairEpisodeSchedule] = {}
+        vehicle_frames = iter(
+            _iter_decision_vehicle_ids(
+                self.trace,
+                period_s=self.generation_period_s,
+                last_frame=self.last_frame_index,
             )
+        )
+        for frame_index in range(self.decision_frame_count):
+            try:
+                vehicle_frame_index, present = next(vehicle_frames)
+            except StopIteration as error:
+                raise FrameReplayError(
+                    "trace ended before every decision frame was validated",
+                    context={"expected_frame_index": frame_index},
+                ) from error
+            if vehicle_frame_index != frame_index:
+                raise FrameReplayError(
+                    "mobility trace is missing a required decision timestamp",
+                    context={
+                        "expected_frame_index": frame_index,
+                        "next_vehicle_frame_index": vehicle_frame_index,
+                    },
+                )
+            starting = self._starts.get(frame_index, ())
+            for episode in starting:
+                active[episode.segment.pair_id] = episode
+            frame_births = len(starting)
+            frame_continuing = len(active) - frame_births
+            births += frame_births
+            continuing += frame_continuing
+            nonempty += bool(active)
+            pair_instances += len(active)
+
+            endpoint_counts: Counter[str] = Counter()
+            completed: list[str] = []
+            frame_natural = 0
+            frame_internal = 0
+            frame_trace_end = 0
+            for pair_id, episode in active.items():
+                segment = episode.segment
+                missing = {segment.tx_id, segment.rx_id} - present
+                if missing:
+                    raise FrameReplayError(
+                        "active pair endpoint is absent from a decision frame",
+                        context={
+                            "trace_id": self.source.trace_id,
+                            "pair_id": pair_id,
+                            "frame_index": frame_index,
+                            "missing": sorted(missing),
+                        },
+                    )
+                endpoint_counts.update((segment.tx_id, segment.rx_id))
+                if episode.last_frame != frame_index:
+                    continue
+                completed.append(pair_id)
+                reason = segment.eligibility_reason
+                if reason in _NATURAL_END_REASONS:
+                    frame_natural += 1
+                elif reason == "max_duration":
+                    frame_internal += 1
+                else:
+                    frame_trace_end += 1
+
+            shared = {
+                endpoint for endpoint, count in endpoint_counts.items() if count > 1
+            }
+            frame_overlap_pairs = sum(
+                bool(shared.intersection((episode.segment.tx_id, episode.segment.rx_id)))
+                for episode in active.values()
+            )
+            frame_overlap_assignments = sum(
+                count for count in endpoint_counts.values() if count > 1
+            )
+            frame_max_multiplicity = max(endpoint_counts.values(), default=0)
+            if shared:
+                overlap_frames += 1
+                overlap_pairs += frame_overlap_pairs
+                overlap_assignments += frame_overlap_assignments
+            max_multiplicity = max(max_multiplicity, frame_max_multiplicity)
+            natural += frame_natural
+            internal += frame_internal
+            trace_end += frame_trace_end
+            aggregates.append(
+                FrameAggregate(
+                    frame_index=frame_index,
+                    time_s=(
+                        self.trace.report.first_time_s
+                        + frame_index * self.generation_period_s
+                    ),
+                    active_pairs=len(active),
+                    births=frame_births,
+                    continuing_pairs=frame_continuing,
+                    natural_terminations=frame_natural,
+                    internal_truncations=frame_internal,
+                    trace_end_truncations=frame_trace_end,
+                    shared_endpoints=len(shared),
+                    pairs_with_shared_endpoint=frame_overlap_pairs,
+                    overlapping_endpoint_assignments=frame_overlap_assignments,
+                    max_endpoint_multiplicity=frame_max_multiplicity,
+                )
+            )
+            for pair_id in completed:
+                del active[pair_id]
+        try:
+            unexpected_frame = next(vehicle_frames)
+        except StopIteration:
+            unexpected_frame = None
+        if unexpected_frame is not None:
+            raise FrameReplayError(
+                "mobility trace contains a decision frame beyond the trace interval"
+            )
+        if active or births != len(self._episodes) or natural + internal + trace_end != births:
+            raise FrameReplayError("source pair episodes do not reconcile with lifecycle events")
         manifest = self.trace.artifact.manifest
-        return FrameReplayReport(
+        report = FrameReplayReport(
             trace_id=self.source.trace_id,
             split=self.source.split,
             density=self.source.density,
@@ -803,12 +981,15 @@ class PopulationFrameReader:
             max_endpoint_multiplicity=max_multiplicity,
             source_end_reason_counts=self._pair_stats.end_reason_counts,
         )
+        return report, tuple(aggregates)
 
 
 __all__ = [
     "FrameReplayError",
+    "FrameAggregate",
     "FrameReplayReport",
     "FrameTraceSource",
+    "PairEpisodeSchedule",
     "PairLifecycle",
     "PopulationFrame",
     "PopulationFrameReader",

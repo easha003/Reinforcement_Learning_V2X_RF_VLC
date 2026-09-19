@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from hybrid_v2x_rl import __version__
+from hybrid_v2x_rl.config import config_hash as hash_config
 from hybrid_v2x_rl.config import headline_config_layers, load_config
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.doctor import doctor_succeeded, run_doctor
+from hybrid_v2x_rl.mean_field.frame_campaign import validate_frame_campaign
+from hybrid_v2x_rl.mean_field.frames import TraceCatalog
 from hybrid_v2x_rl.mobility.pipeline import (
     GridTracePipeline,
     SplitCounts,
@@ -31,7 +34,13 @@ mobility_app = typer.Typer(
     help="Analytic Manhattan-grid mobility commands.",
     no_args_is_help=True,
 )
+frames_app = typer.Typer(
+    name="frames",
+    help="Population-frame replay and validation commands.",
+    no_args_is_help=True,
+)
 app.add_typer(mobility_app)
+app.add_typer(frames_app)
 console = Console()
 
 
@@ -202,6 +211,72 @@ def mobility_generate_traces(
 
     if not result.gate1_passed:
         raise typer.Exit(code=1)
+
+
+@frames_app.command("validate-campaign")
+def frames_validate_campaign(
+    config: Annotated[
+        list[Path] | None,
+        typer.Option("--config", help="Layered YAML path; repeat in merge order.", exists=True),
+    ] = None,
+    project_root: Annotated[
+        Path | None,
+        typer.Option("--project-root", help="Project root containing configs/.", exists=True),
+    ] = None,
+    artifact_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--artifact-root",
+            help="Artifact root for frame caches; defaults to configured paths.artifact_root.",
+            file_okay=False,
+        ),
+    ] = None,
+    report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--report",
+            help="Machine-readable campaign report path.",
+            dir_okay=False,
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the complete machine-readable report."),
+    ] = False,
+) -> None:
+    """Validate all configured traces and publish compact immutable frame caches."""
+
+    root = project_root if project_root is not None else Path.cwd()
+    layers = tuple(config) if config else headline_config_layers(root)
+    try:
+        resolved = load_config(layers, project_root=root)
+        digest = hash_config(resolved)
+        output_root = artifact_root or resolved.paths.artifact_root
+        report = validate_frame_campaign(
+            TraceCatalog.from_splits(resolved.paths.trace_root, resolved.environment.splits),
+            generation_period_s=resolved.service.generation_period_s,
+            expected_config_hash=digest,
+            artifact_root=output_root,
+            code_version=__version__,
+        )
+        destination = report.write_json(
+            report_path or output_root / "frame_campaign_validation.json"
+        )
+    except HybridV2XError as error:
+        console.print(f"[red]{type(error).__name__}: {error}[/red]")
+        raise typer.Exit(code=1) from error
+
+    payload = report.as_dict()
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        totals = cast(dict[str, object], payload["totals"])
+        console.print(
+            "[green]Phase 2 frame validation passed[/green]: "
+            f"{payload['trace_count']} traces, {totals['frames']} frames, "
+            f"{totals['decision_pair_episodes']} pair episodes"
+        )
+        console.print(f"campaign report: {destination}")
 
 
 if __name__ == "__main__":

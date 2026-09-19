@@ -16,12 +16,14 @@ build/
 artifacts/traces/*
 artifacts/traces-*/
 artifacts/caches/
+artifacts/frame_caches/
 artifacts/checkpoints/
 artifacts/evaluations/
 artifacts/policies/
 artifacts/logs/
 artifacts/figures/
 artifacts/campaign_manifest.json
+artifacts/frame_campaign_validation.json
 
 # Preserve the empty canonical trace directory in a fresh clone.
 !artifacts/traces/.gitkeep

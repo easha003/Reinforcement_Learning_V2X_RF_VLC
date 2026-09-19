@@ -5,9 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from hybrid_v2x_rl.artifacts.store import ArtifactStore
 from hybrid_v2x_rl.config.models import TraceSplitConfig
+from hybrid_v2x_rl.mean_field.frame_cache import (
+    CACHE_EXCLUDES,
+    FRAME_CACHE_FORMAT_VERSION,
+    PopulationFrameCacheReader,
+    write_population_frame_cache,
+)
+from hybrid_v2x_rl.mean_field.frame_campaign import validate_frame_campaign
 from hybrid_v2x_rl.mean_field.frames import (
     FrameReplayError,
     FrameTraceSource,
@@ -229,6 +235,65 @@ def test_endpoint_overlap_is_reported_without_changing_the_population(trace_path
     assert report.pair_instances_with_endpoint_overlap == 5
     assert report.overlapping_endpoint_assignments == 6
     assert report.max_endpoint_multiplicity == 2
+
+
+def test_spatial_index_is_built_lazily_and_reused(trace_path: Path) -> None:
+    frame = next(_reader(trace_path).iter_frames())
+
+    assert frame._spatial_index is None
+    first = frame.spatial_index
+    assert frame.spatial_index is first
+
+
+def test_compact_cache_freezes_policy_independent_replay_structure(
+    trace_path: Path,
+    tmp_path: Path,
+) -> None:
+    source_reader = _reader(trace_path)
+    artifact, report = write_population_frame_cache(
+        source_reader,
+        ArtifactStore(tmp_path / "cache-artifacts"),
+        code_version="test",
+    )
+    cached = PopulationFrameCacheReader(artifact.path, expected_trace=source_reader)
+
+    assert cached.summary["cache_format_version"] == FRAME_CACHE_FORMAT_VERSION
+    assert cached.summary["excludes"] == list(CACHE_EXCLUDES)
+    assert cached.active_pair_ids(0) == ("pair-a", "pair-c")
+    assert cached.active_pair_ids(1) == ("pair-a", "pair-b", "pair-c")
+    assert cached.active_pair_ids(3) == ("pair-b",)
+    assert len(tuple(cached.iter_frame_rows())) == report.frames
+    assert artifact.manifest.input_artifacts == [source_reader.trace.artifact.reference]
+
+
+def test_campaign_validation_is_resumable_and_persists_report(
+    trace_path: Path,
+    tmp_path: Path,
+) -> None:
+    catalog = TraceCatalog(sources=(FrameTraceSource.discover(trace_path),))
+    artifact_root = tmp_path / "campaign-artifacts"
+
+    first = validate_frame_campaign(
+        catalog,
+        generation_period_s=0.1,
+        expected_config_hash=CONFIG_HASH,
+        artifact_root=artifact_root,
+        code_version="test",
+    )
+    second = validate_frame_campaign(
+        catalog,
+        generation_period_s=0.1,
+        expected_config_hash=CONFIG_HASH,
+        artifact_root=artifact_root,
+        code_version="test",
+    )
+    destination = second.write_json(tmp_path / "campaign.json")
+
+    assert first.passed
+    assert not first.traces[0].reused
+    assert second.traces[0].reused
+    assert second.as_dict()["totals"]["births"] == 3  # type: ignore[index]
+    assert destination.read_text(encoding="utf-8").endswith("\n")
 
 
 def test_artifact_configuration_mismatch_is_rejected(trace_path: Path) -> None:
