@@ -183,7 +183,10 @@ Prerequisite status (2026-09-19): **passed**. The complete 21-trace campaign
 passed Gate 1, full artifact-integrity verification, split reconciliation, and
 pair-lifecycle reconciliation. See
 [`TRACE_CAMPAIGN_VALIDATION.md`](TRACE_CAMPAIGN_VALIDATION.md). Phase 2
-implementation tasks remain open below.
+implementation began on 2026-09-19 with the verified chronological reader and
+lifecycle types in `hybrid_v2x_rl.mean_field.frames`. The remaining unchecked
+task is the campaign-wide source-to-frame reconciliation and its persisted
+validation report.
 
 ### Objective
 
@@ -195,14 +198,14 @@ An episode-grouped, one-pair-at-a-time cache loses simultaneous population struc
 
 ### Tasks
 
-- [ ] Read raw trace records in chronological order.
-- [ ] Group all active pairs that share a decision time into one population frame.
-- [ ] Preserve trace ID, pair ID, timestamp, density, episode membership, and neighbor relationships.
-- [ ] Represent pair births, continuing pairs, natural terminations, and trace truncations explicitly.
-- [ ] Keep train, validation, and test trace membership immutable.
-- [ ] Make replay deterministic under a fixed seed and configuration.
+- [x] Read raw trace records in chronological order.
+- [x] Group all active pairs that share a decision time into one population frame.
+- [x] Preserve trace ID, pair ID, timestamp, density, episode membership, and neighbor relationships.
+- [x] Represent pair births, continuing pairs, natural terminations, and trace truncations explicitly.
+- [x] Keep train, validation, and test trace membership immutable.
+- [x] Make replay deterministic under a fixed seed and configuration.
 - [ ] Validate source counts: records, frames, unique pairs, births, terminations, and densities.
-- [ ] Add small synthetic fixtures that test asynchronous births and variable population sizes.
+- [x] Add small synthetic fixtures that test asynchronous births and variable population sizes.
 
 ### Safe precomputation
 
@@ -631,7 +634,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-The 21-trace campaign is generated and verified. Implement Phase 2's
-chronological population-frame layer against environment contract `1.0.0`,
-starting with the frame/lifecycle data structures and asynchronous-birth test
-fixtures described above.
+The chronological population-frame reader, lifecycle structures, immutable
+split catalog, asynchronous-birth fixtures, and deterministic replay tests are
+implemented. Run campaign-wide source-to-frame validation, persist its report,
+and freeze the Phase 2 cache format before advancing to Phase 3.
