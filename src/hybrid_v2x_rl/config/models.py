@@ -343,21 +343,19 @@ class ObservationConfig(ConfigModel):
 
 
 class CostConfig(ConfigModel):
-    """Normalized committed-link activation costs."""
+    """Normalized resource costs used by the population environment.
+
+    ``rf_activation`` is the cost of one *reserved RF attempt*, not one RF
+    packet.  The nine-action environment therefore derives every action cost
+    as ``rf_activation * attempts + vlc_activation * uses_vlc``.  Keeping the
+    two primitive coefficients here avoids a separate DUP price that could
+    drift away from the resources the action actually reserves.
+    """
 
     units: Literal["normalized_activation"] = "normalized_activation"
     rf_activation: PositiveFloat
     vlc_activation: PositiveFloat
-    dup_activation: PositiveFloat
     vlc_to_rf_sensitivity: tuple[PositiveFloat, ...] = (0.3, 0.5, 1.0)
-
-    @model_validator(mode="after")
-    def duplication_commits_both_legs(self) -> CostConfig:
-        expected = self.rf_activation + self.vlc_activation
-        if not math.isclose(self.dup_activation, expected, rel_tol=0.0, abs_tol=1e-12):
-            raise ValueError("dup_activation must equal rf_activation + vlc_activation")
-        return self
-
 
 class TraceSplitConfig(ConfigModel):
     """Immutable full-trajectory split identifiers."""
@@ -375,10 +373,66 @@ class TraceSplitConfig(ConfigModel):
         return self
 
 
-class EnvironmentConfig(ConfigModel):
-    """Trace-replay environment and action semantics."""
+PolicyActionName = Literal[
+    "VLC",
+    "RF-1",
+    "RF-2",
+    "RF-3",
+    "RF-4",
+    "DUP-1",
+    "DUP-2",
+    "DUP-3",
+    "DUP-4",
+]
 
-    actions: tuple[Literal["RF", "VLC", "DUP"], ...] = ("RF", "VLC", "DUP")
+POLICY_ACTION_ORDER: tuple[PolicyActionName, ...] = (
+    "VLC",
+    "RF-1",
+    "RF-2",
+    "RF-3",
+    "RF-4",
+    "DUP-1",
+    "DUP-2",
+    "DUP-3",
+    "DUP-4",
+)
+
+
+class MeanFieldConfig(ConfigModel):
+    """Causal population signal appended to every local observation."""
+
+    signal: Literal["delayed_mean_rf_attempt_fraction"]
+    delay_frames: Literal[1] = 1
+    initial_value: Probability = 0.0
+    include_validity_flag: bool = True
+
+    @model_validator(mode="after")
+    def frozen_reset_encoding(self) -> MeanFieldConfig:
+        if self.initial_value != 0.0:
+            raise ValueError("mean-field initial_value must be 0.0")
+        if not self.include_validity_flag:
+            raise ValueError("mean-field signal requires an explicit validity flag")
+        return self
+
+
+class ObservationNormalizationConfig(ConfigModel):
+    """Training-only running normalization persisted with each checkpoint."""
+
+    method: Literal["running_standardization"]
+    update_scope: Literal["training_only"] = "training_only"
+    epsilon: PositiveFloat = 1e-8
+    clip_abs: PositiveFloat = 10.0
+
+
+class EnvironmentConfig(ConfigModel):
+    """Versioned population-environment and action semantics."""
+
+    contract_version: Literal["1.0.0"]
+    actions: tuple[PolicyActionName, ...] = POLICY_ACTION_ORDER
+    max_rf_attempts: Literal[4] = 4
+    no_observation_fallback_action: Literal["DUP-4"] = "DUP-4"
+    mean_field: MeanFieldConfig
+    normalization: ObservationNormalizationConfig
     episode_duration_s: PositiveFloat = 60.0
     packets_per_episode: PositiveInt = 600
     matched_random_tapes: bool = True
@@ -387,8 +441,10 @@ class EnvironmentConfig(ConfigModel):
 
     @model_validator(mode="after")
     def complete_action_set(self) -> EnvironmentConfig:
-        if self.actions != ("RF", "VLC", "DUP"):
-            raise ValueError("headline action order must be RF, VLC, DUP")
+        if self.actions != POLICY_ACTION_ORDER:
+            raise ValueError(
+                "environment contract 1.0.0 requires the canonical nine-action order"
+            )
         return self
 
 
@@ -474,7 +530,7 @@ class EvaluationConfig(ConfigModel):
 class ProjectConfig(ConfigModel):
     """Complete, resolved Hybrid RF/VLC RL experiment configuration."""
 
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.1"]
     project: ProjectMetadataConfig
     mobility: MobilityConfig
     service: ServiceConfig

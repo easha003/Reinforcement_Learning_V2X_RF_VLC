@@ -11,7 +11,7 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-from hybrid_v2x_rl.config.models import PhyTimingConfig, ProjectConfig
+from hybrid_v2x_rl.config.models import POLICY_ACTION_ORDER, PhyTimingConfig, ProjectConfig
 from hybrid_v2x_rl.core.errors import ConfigurationError
 
 FORBIDDEN_OBSERVATION_FIELDS = frozenset(
@@ -105,7 +105,9 @@ def _validate_headline_contract(config: ProjectConfig) -> None:
 
     _require_headline("cost.rf_activation", config.cost.rf_activation, 1.0)
     _require_headline("cost.vlc_activation", config.cost.vlc_activation, 1.0)
-    _require_headline("cost.dup_activation", config.cost.dup_activation, 2.0)
+    _require_headline("environment.contract_version", config.environment.contract_version, "1.0.0")
+    _require_headline("environment.actions", config.environment.actions, POLICY_ACTION_ORDER)
+    _require_headline("environment.max_rf_attempts", config.environment.max_rf_attempts, 4)
     _require_headline(
         "geometry.tagged_pair_mode",
         config.geometry.tagged_pair_mode,
@@ -177,9 +179,17 @@ def _validate_committed_airtime(config: ProjectConfig) -> None:
         )
 
     committed = 0.0
+    rf_attempts = 0
     if config.rf.enabled:
+        # The inherited three-action lifecycle still reads the service-level
+        # attempt count.  Environment contract 1.0.0 adds RF-1 through RF-4,
+        # so both interfaces must fit until Phase 3 replaces the former.
+        rf_attempts = max(
+            service.rf_attempts_per_packet,
+            config.environment.max_rf_attempts,
+        )
         committed = max(
-            committed, config.rf.timing.airtime_s * service.rf_attempts_per_packet
+            committed, config.rf.timing.airtime_s * rf_attempts
         )
     if config.vlc.enabled:
         committed = max(committed, config.vlc.timing.airtime_s)
@@ -188,7 +198,7 @@ def _validate_committed_airtime(config: ProjectConfig) -> None:
             f"committed airtime {committed:g} s exceeds the {available:g} s the "
             f"{service.deadline_s:g} s deadline leaves after a "
             f"{service.predecision_lead_s:g} s pre-decision lead "
-            f"(rf_attempts_per_packet={service.rf_attempts_per_packet})"
+            f"(maximum_rf_attempts={rf_attempts})"
         )
 
 

@@ -134,14 +134,12 @@ dataset and was never added to Git.
 ## Current modeling boundary
 
 The inherited code still exposes the original three actions: `RF`, `VLC`, and
-`DUP`. The planned nine-action interface, including RF attempt levels 1–4, is
-not part of this baseline. It will be frozen in the Phase 1 environment
-contract and implemented through the population action model in Phase 3.
+`DUP`. The nine-action interface, including RF attempt levels 1–4, is now
+frozen in the Phase 1 environment contract. It remains intentionally
+unimplemented until the population action model in Phase 3.
 
 ## Next gate
 
-1. Freeze the Phase 1 environment contract while the full campaign is being
-   prepared.
-2. Generate and verify all 21 raw mobility traces from a clean commit.
-3. Begin Phase 2 only after trace counts, splits, and lifecycle semantics are
+1. Generate and verify all 21 raw mobility traces from a clean commit.
+2. Begin Phase 2 only after trace counts, splits, and lifecycle semantics are
    confirmed against the generated artifacts.

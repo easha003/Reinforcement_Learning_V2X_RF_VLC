@@ -15,6 +15,11 @@ service:
   miss_budget: 0.0001
   predecision_lead_s: 0.0001
   harq_enabled: false
+  # Legacy fixed-policy baseline used by the inherited three-action packet
+  # lifecycle.  Environment contract 1.0.0 replaces this fixed count with the
+  # action-specific RF-1 through RF-4 levels declared under ``environment``;
+  # this value remains 3 until Phase 3 removes the legacy interface.
+  #
   # Raised from 1 on 2026-08-10.  Collision alone puts a 1.5-12% floor on a
   # single attempt, which is 150-1200x the miss budget, so one attempt was never
   # a candidate at any density or any end of the declared band.  Three hopped

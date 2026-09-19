@@ -1,5 +1,10 @@
 # RL extension: initial problem contract
 
+This initial scope is retained as the research rationale. The normative,
+implementation-level contract is now
+[`RL_ENVIRONMENT_CONTRACT_V1.md`](RL_ENVIRONMENT_CONTRACT_V1.md), version
+`1.0.0`.
+
 ## Research question
 
 Can causal decentralized RF/VLC decisions reduce activation and shared RF-pool

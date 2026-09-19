@@ -42,7 +42,22 @@ def test_deep_merge_is_recursive_ordered_and_nonmutating() -> None:
 def test_headline_loader_returns_frozen_resolved_configuration() -> None:
     config = load_headline_config(PROJECT_ROOT)
 
-    assert config.schema_version == "1.0"
+    assert config.schema_version == "1.1"
+    assert config.environment.contract_version == "1.0.0"
+    assert config.environment.actions == (
+        "VLC",
+        "RF-1",
+        "RF-2",
+        "RF-3",
+        "RF-4",
+        "DUP-1",
+        "DUP-2",
+        "DUP-3",
+        "DUP-4",
+    )
+    assert config.environment.max_rf_attempts == 4
+    assert config.environment.mean_field.delay_frames == 1
+    assert config.environment.mean_field.include_validity_flag
     assert config.service.payload_bytes == 300
     assert config.service.deadline_s == pytest.approx(0.003)
     assert config.service.miss_budget == pytest.approx(1e-4)

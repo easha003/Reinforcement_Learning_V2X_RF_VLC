@@ -1,4 +1,4 @@
-schema_version: "1.0"
+schema_version: "1.1"
 
 project:
   name: "hybrid-rf-vlc-rl"
@@ -44,13 +44,39 @@ geometry:
 
 cost:
   units: "normalized_activation"
+  # Cost of one reserved RF attempt.  An RF-n action costs n times this value.
   rf_activation: 1.0
+  # Charged once whenever the optical transmitter is activated.
   vlc_activation: 1.0
-  dup_activation: 2.0
   vlc_to_rf_sensitivity: [0.3, 0.5, 1.0]
 
 environment:
-  actions: ["RF", "VLC", "DUP"]
+  contract_version: "1.0.0"
+  # Index order is checkpoint- and artifact-bearing; do not reorder in place.
+  actions:
+    - "VLC"
+    - "RF-1"
+    - "RF-2"
+    - "RF-3"
+    - "RF-4"
+    - "DUP-1"
+    - "DUP-2"
+    - "DUP-3"
+    - "DUP-4"
+  max_rf_attempts: 4
+  # A pair with no causal track is still evaluated, but is excluded from the
+  # policy loss and uses this conservative deployable fallback.
+  no_observation_fallback_action: "DUP-4"
+  mean_field:
+    signal: "delayed_mean_rf_attempt_fraction"
+    delay_frames: 1
+    initial_value: 0.0
+    include_validity_flag: true
+  normalization:
+    method: "running_standardization"
+    update_scope: "training_only"
+    epsilon: 0.00000001
+    clip_abs: 10.0
   episode_duration_s: 60.0
   packets_per_episode: 600
   matched_random_tapes: true

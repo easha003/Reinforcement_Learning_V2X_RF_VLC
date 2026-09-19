@@ -21,7 +21,10 @@ diagnostic baseline. It is not treated as a deployable policy because it can
 use true optical risk.
 
 See [`docs/RL_EXTENSION_SCOPE.md`](docs/RL_EXTENSION_SCOPE.md) for the initial
-problem contract and acceptance gates.
+research scope, [`docs/RL_ENVIRONMENT_CONTRACT_V1.md`](docs/RL_ENVIRONMENT_CONTRACT_V1.md)
+for the frozen environment interface, and
+[`docs/RL_EXTENSION_WORK_PLAN.md`](docs/RL_EXTENSION_WORK_PLAN.md) for the
+phase gates.
 
 ## Repository layout
 

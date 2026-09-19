@@ -116,18 +116,22 @@ All inherited tests pass, the working tree contains only intended source files, 
 
 Freeze the mathematical and software contract before implementing the RL environment.
 
+Status: complete in
+[`RL_ENVIRONMENT_CONTRACT_V1.md`](RL_ENVIRONMENT_CONTRACT_V1.md), contract
+version `1.0.0` and project configuration schema `1.1`.
+
 ### Tasks
 
-- [ ] Define one decision epoch and the ordering of observation, action, population aggregation, outcome generation, reward/cost assignment, feedback update, and time advance.
-- [ ] Define the local observation vector, feature units, normalization, valid ranges, missing-data behavior, and causal availability.
-- [ ] Define any mean-field input, such as delayed CBR, delayed RF load, or a population-action histogram.
-- [ ] Define the nine actions and their RF/VLC resource consequences.
-- [ ] Define reward as negative activation/resource cost, with separate coefficients for VLC activation and each RF attempt.
-- [ ] Define the deadline event and per-packet constraint cost.
-- [ ] Define the per-density constrained objective and dual variables.
-- [ ] Define pair birth, normal transition, trace-boundary truncation, and pair termination semantics.
-- [ ] Separate decentralized actor inputs from any centralized critic-only inputs.
-- [ ] Document all tensor shapes for variable population sizes and batching.
+- [x] Define one decision epoch and the ordering of observation, action, population aggregation, outcome generation, reward/cost assignment, feedback update, and time advance.
+- [x] Define the local observation vector, feature units, normalization, valid ranges, missing-data behavior, and causal availability.
+- [x] Define any mean-field input, such as delayed CBR, delayed RF load, or a population-action histogram.
+- [x] Define the nine actions and their RF/VLC resource consequences.
+- [x] Define reward as negative activation/resource cost, with separate coefficients for VLC activation and each RF attempt.
+- [x] Define the deadline event and per-packet constraint cost.
+- [x] Define the per-density constrained objective and dual variables.
+- [x] Define pair birth, normal transition, trace-boundary truncation, and pair termination semantics.
+- [x] Separate decentralized actor inputs from any centralized critic-only inputs.
+- [x] Document all tensor shapes for variable population sizes and batching.
 
 ### Core formulation
 
@@ -161,11 +165,11 @@ The numerical cost coefficients, deadline definition, and reliability budgets mu
 
 ### Deliverables
 
-- Versioned environment contract
-- Observation and action schema
-- Reward/constraint specification
-- Timing and lifecycle specification
-- Centralized-training/decentralized-execution boundary
+- [Versioned environment contract](RL_ENVIRONMENT_CONTRACT_V1.md)
+- Observation and action schema in contract Sections 3 and 6
+- Reward/constraint specification in contract Sections 1 and 4
+- Timing and lifecycle specification in contract Sections 2 and 10
+- Centralized-training/decentralized-execution boundary in contract Section 8
 
 ### Completion gate
 
@@ -621,4 +625,5 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Complete Phase 0, then freeze the Phase 1 environment contract before implementing the chronological population-frame trace layer.
+Generate and verify the 21-trace campaign, then implement Phase 2's
+chronological population-frame layer against environment contract `1.0.0`.

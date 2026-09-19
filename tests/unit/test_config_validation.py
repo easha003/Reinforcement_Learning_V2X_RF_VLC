@@ -139,14 +139,20 @@ def test_ultra_target_requires_powered_evaluation_plan(tmp_path: Path) -> None:
         )
 
 
-def test_dup_cost_must_equal_committed_leg_costs(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigurationError,
-        match=r"dup_activation must equal rf_activation \+ vlc_activation",
-    ):
+def test_environment_action_order_is_contract_bearing(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="canonical nine-action order"):
         _load_with_override(
             tmp_path,
-            "cost:\n  dup_activation: 1.5\n",
+            "environment:\n"
+            "  actions: [RF-1, VLC, RF-2, RF-3, RF-4, DUP-1, DUP-2, DUP-3, DUP-4]\n",
+        )
+
+
+def test_mean_field_reset_has_explicit_missing_encoding(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="mean-field initial_value must be 0.0"):
+        _load_with_override(
+            tmp_path,
+            "environment:\n  mean_field:\n    initial_value: 0.5\n",
         )
 
 
