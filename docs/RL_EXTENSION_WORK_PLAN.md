@@ -179,6 +179,12 @@ Another researcher can implement a compatible environment from the written contr
 
 ## Phase 2 — Frame-oriented trace layer
 
+Prerequisite status (2026-09-19): **passed**. The complete 21-trace campaign
+passed Gate 1, full artifact-integrity verification, split reconciliation, and
+pair-lifecycle reconciliation. See
+[`TRACE_CAMPAIGN_VALIDATION.md`](TRACE_CAMPAIGN_VALIDATION.md). Phase 2
+implementation tasks remain open below.
+
 ### Objective
 
 Convert the existing trace replay into a chronological population view that preserves simultaneous decisions.
@@ -625,5 +631,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Generate and verify the 21-trace campaign, then implement Phase 2's
-chronological population-frame layer against environment contract `1.0.0`.
+The 21-trace campaign is generated and verified. Implement Phase 2's
+chronological population-frame layer against environment contract `1.0.0`,
+starting with the frame/lifecycle data structures and asynchronous-birth test
+fixtures described above.
