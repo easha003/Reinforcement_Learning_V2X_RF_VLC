@@ -1,0 +1,60 @@
+# Concentrated optical front end for the exploratory 10^-5 reliability
+# frontier.  Layer this after configs/channel/vlc_vehicle.yaml; it overrides
+# the receiver semi-angle and nothing else.
+#
+# Narrowing psi_c from 60 to 30 deg raises concentrator gain from 1.33 n^2 to
+# 4 n^2, a 4.8 dB optical and 9.5 dB electrical improvement.  Background
+# collection falls only slightly, by 1.24x, because a narrower cone also
+# implies a smaller entrance aperture for the same detector; the two effects
+# very nearly cancel, which is why the wide cone buys almost no noise relief
+# for all the gain it gives up.  Net electrical SNR improves by roughly 10 dB
+# whether the receiver is background-limited by day or thermal-limited at
+# night.
+#
+# What that headroom is worth, stated precisely, because it is easy to both
+# oversell and undersell.  Under duplication a miss needs both legs to fail, so
+# the hybrid relaxes the RF single-shot requirement by 1 / P(VLC fails), and
+#
+#     P(VLC fails) = P_out + (1 - P_out) * PER_clear
+#
+# where P_out is geometric outage, measured at 3.41 / 1.87 / 1.01% for
+# 10 / 20 / 30 veh/lane-km in work plan section 4.6.1.  (Superseded values
+# 11.9 / 22.2 / 16.1% came from traces carrying the section 4.6.3 and 4.6.5
+# defects.)  The concentrator cannot touch P_out: a blocked path delivers
+# nothing at any transmit power.  It acts only on PER_clear, and so moves
+# P(VLC fails) toward its geometric floor without ever going below it.
+#
+# The size of that move grew when the floor fell.  At 10 veh/lane-km the
+# relaxation factor now runs from 1.9x if the wide receiver is marginal
+# (PER_clear ~ 0.5) to 29.3x if the optical link is already strong
+# (PER_clear ~ 0), the difference between needing RF single-shot BLER of
+# 1.9e-5 and of 2.9e-4 to reach 10^-5.  Roughly 15x of RF headroom is at stake,
+# against 4.7x under the contaminated figures: a lower geometric outage raises
+# the stake on the clear-path link budget, because the optics then decide a
+# larger share of P(VLC fails).  This is now the single largest lever in the
+# section 14.1 table.
+#
+# **Which end of that range applies is a Gate-2 measurement, not an
+# assumption.**  Optical power falls as 1/d^2 and the separation window runs to
+# 40 m, so the wide receiver may well sit on its PER waterfall at the long end,
+# where blockage is also highest.  If PER_clear is already negligible at 40 m
+# with 60 deg then this layer is redundant and the headline value is simply
+# correct.  See work plan section 20.
+#
+# **The alignment side of this sensitivity is optimistic and must be reported
+# as such.**  A 30 deg semi-angle leaves 8.9 m of lateral tolerance over a
+# 15.5 m optical path, against roughly 3 m of lane width, so the analytic grid
+# charges it almost nothing.  The grid is straight, single-lane, and without
+# grade or lane changing (work plan section 4.7 item 6), so it cannot represent
+# the road curvature, braking pitch and lateral dynamics that are the real cost
+# of a narrow cone.  Measured availability therefore barely moves between the
+# two values while the link budget moves 10 dB, and that asymmetry is an
+# artefact of the mobility model, not a property of the hardware.
+#
+# The link-budget side is not optimistic in the same way: concentrator gain is
+# a property of the optics and holds regardless of what the mobility model can
+# represent.  The two must be reported separately rather than merged into one
+# verdict on the narrow receiver.
+
+vlc:
+  receiver_fov_deg: 30.0

@@ -1,0 +1,54 @@
+# Sensing represents *cooperative awareness*: neighbours are known from the
+# periodic status messages they broadcast over the same sidelink the tagged pair
+# uses, not from onboard radar or camera tracking of uncooperative vehicles.
+# That one sentence decides every value below.  Heading and dimensions are
+# broadcast fields, so they are known well rather than inferred; a neighbour is
+# forgotten when its messages stop rather than when it leaves a sensor's field
+# of view; and position error is the sender's own positioning error.
+observation:
+  history_packets: 8
+  track_update_s: 0.05
+  track_latency_s: 0.05
+  # Optimistic for unaugmented GNSS, which is metre-class.  Declared as an
+  # assumption, and 0.25/1.0 m are the sensitivity points.
+  position_noise_std_m: 0.5
+  speed_noise_std_mps: 0.2
+  # Attitude error of the *sending* vehicle's GNSS/IMU, not a tracker estimate.
+  # Zero would let the policy see a leader's turn perfectly, and section 4.6.1
+  # measured that turn as the dominant cause of junction unavailability, so the
+  # model would be cleanest exactly where the result is decided.  Still
+  # unsourced; see section 20.
+  heading_noise_std_deg: 2.0
+  # Awareness-message timeout: a neighbour unheard for this long is dropped.
+  track_lifetime_s: 1.0
+  forecast_horizon_s: 0.2
+  interpolate_tracks: false
+  action_dependent_link_feedback: true
+  features:
+    - "rf_quality"
+    - "rf_quality_age"
+    - "rf_quality_history"
+    - "vlc_quality"
+    - "vlc_quality_age"
+    - "vlc_quality_history"
+    - "rf_channel_busy_ratio"
+    - "neighbor_count"
+    - "pair_distance"
+    - "pair_bearing"
+    - "relative_speed"
+    - "heading_difference"
+    - "optical_fov_margin"
+    # Junction geometry, added after work plan section 4.6.1 measured a
+    # 65-121x lift on it against a separation signal that is weak and
+    # non-monotonic.  Lawful: own pose plus a road map, which a real
+    # vehicle carries.  Computed from noisy poses, so the spanning
+    # indicator is honestly uncertain near the boundary rather than a
+    # clean oracle bit.
+    - "distance_to_junction"
+    - "path_spans_junction"
+    - "predicted_blockage_probability"
+    - "predictor_confidence"
+    - "track_age"
+    - "previous_action"
+    - "last_delivery_outcome"
+    - "consecutive_miss_count"

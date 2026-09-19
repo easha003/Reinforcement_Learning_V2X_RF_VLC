@@ -1,0 +1,31 @@
+# Headline conference profile.
+#
+# Payload and deadline follow the 3GPP TR 38.913 eV2X reference row (300 B,
+# 3-10 ms).  The 1e-4 miss budget follows the 99.99% reliability class of the
+# TS 22.186 advanced-driving services rather than the eV2X row's own 1e-5.
+#
+# The 1e-5 level is retained as a declared frontier in
+# ev2x_300B_3ms_1e-5.yaml.  Headline and frontier differ only in miss budget,
+# so a 1e-5 result upgrades the claim without re-freezing this contract.
+
+service:
+  payload_bytes: 300
+  generation_period_s: 0.1
+  deadline_s: 0.003
+  miss_budget: 0.0001
+  predecision_lead_s: 0.0001
+  harq_enabled: false
+  # Raised from 1 on 2026-08-10.  Collision alone puts a 1.5-12% floor on a
+  # single attempt, which is 150-1200x the miss budget, so one attempt was never
+  # a candidate at any density or any end of the declared band.  Three hopped
+  # attempts clear 1e-4 at every trained density on the NOMINAL band with about
+  # an order of magnitude spare, which is what makes the result reportable
+  # without selecting the favourable end of an uncertainty.
+  #
+  # Affordable only because the modulation changed: 16QAM fits the block in one
+  # 0.5 ms slot instead of two, so three attempts cost 1.5 ms of the 2.9 ms the
+  # deadline leaves, and still run concurrently with the 2.4 ms optical leg.
+  rf_attempts_per_packet: 3
+  vlc_attempts_per_packet: 1
+  dup_simultaneous: true
+  rf_resource_assumption: "pre_reserved"

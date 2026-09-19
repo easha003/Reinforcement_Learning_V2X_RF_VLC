@@ -1,0 +1,10 @@
+training:
+  curriculum:
+    - fraction: 0.10
+      miss_budget: 0.01
+    - fraction: 0.20
+      miss_budget: 0.001
+    - fraction: 0.30
+      miss_budget: 0.0001
+    - fraction: 0.40
+      miss_budget: 0.00001

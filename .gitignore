@@ -1,0 +1,27 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+
+# Reproducible/generated experiment artifacts stay outside Git.
+artifacts/traces/*
+artifacts/traces-*/
+artifacts/caches/
+artifacts/checkpoints/
+artifacts/evaluations/
+artifacts/policies/
+artifacts/logs/
+artifacts/figures/
+artifacts/campaign_manifest.json
+
+# Preserve the empty canonical trace directory in a fresh clone.
+!artifacts/traces/.gitkeep

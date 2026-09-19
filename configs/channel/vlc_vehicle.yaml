@@ -1,0 +1,61 @@
+vlc:
+  enabled: true
+  # W17 (Memedi & Dressler 2021) limits automotive high-brightness LED
+  # modulation bandwidth to "a few MHz" through junction capacitance and
+  # phosphor response.  5 MHz is the optimistic edge of that range.
+  electrical_bandwidth_hz: 5000000.0
+  modulation: "ook"
+  modulation_order: 2
+  pulse_roll_off: 0.3
+  headlamp_pattern: "measured_non_lambertian"
+  # Built 2026-08-10 from the ECE R112 test-point geometry and the achieved
+  # illuminances of a compliant four-LED design (Wang, Wang, Li and Ge, Applied
+  # Optics 54(7):1794, 2015, Fig. 4 and Table 2).  A regulatory envelope, not a
+  # measured lamp: cells without a test point carry the applicable zone limit,
+  # which is a bound rather than a value.  Recorded in the artifact manifest.
+  pattern_artifact: "artifacts/calibration/vlc/headlamp-r112-compliant-wide-v2"
+  # Receiver *semi-angle* psi_c, not a full cone: the photodiode accepts light
+  # arriving up to 60 deg off its boresight, for a total opening of 120 deg.
+  # This follows the Kahn-Barry optical front end the Lambertian and
+  # non-Lambertian treatment here is built on, where the concentrator admits
+  # 0 <= psi <= psi_c.  Geometry applies the interpretation in exactly one
+  # place, hybrid_v2x_rl/geometry/pair_geometry.py.
+  #
+  # 60 deg is the deliberately pessimistic choice, and it is pessimistic for
+  # V-VLC rather than against it.  Concentrator gain goes as n^2/sin^2(psi_c),
+  # so a wider cone collects *less* signal: 1.33 n^2 here against 4 n^2 at
+  # 30 deg, a 4.8 dB optical penalty.  Background collection barely
+  # compensates, since it goes as 2*pi*n^2/(1 + cos psi_c) and differs by only
+  # 1.24x between the two.  Net electrical SNR is roughly 10 dB worse at
+  # 60 deg.  The headline therefore claims a weaker optical front end than a
+  # well-designed receiver would deliver, so the hybrid result gets stronger
+  # under scrutiny rather than weaker.
+  #
+  # The exploratory 10^-5 reliability frontier uses 30 deg instead, in
+  # configs/channel/vlc_vehicle_concentrated.yaml, and reporting it as a
+  # sensitivity turns a convention ambiguity into a result.  The extra ~10 dB
+  # does not lower the reliability floor -- geometric outage sets that, and no
+  # optical gain reaches a blocked path -- but it does decide how close the
+  # link gets to that floor, which is worth up to 4.7x of RF single-shot BLER
+  # headroom.  Whether it is worth 1.1x or 4.7x depends on the clear-path PER
+  # at long separation, which is a Gate-2 measurement.
+  #
+  # Whatever value is in force, M4 must use the same psi_c in the concentrator
+  # gain as the acceptance test uses.  A wide cone for availability combined
+  # with narrow-cone gain in the link budget counts the same physics twice.
+  #
+  # Still unsourced; see work plan section 4.7 item 6 and section 20.
+  receiver_fov_deg: 60.0
+  ambient_condition: "clear_night"
+  complete_blockage_main: true
+  residual_optical_floor_enabled: false
+  timing:
+    # At 4.5 Mbit/s OOK with roll-off 0.3 the occupied baseband bandwidth is
+    # 2.93 MHz, or 59% of the declared front end.  The 3-ms deadline buys a
+    # rate-1/4 code while keeping the symbol rate inside the LED's flat
+    # region, where the earlier 1-ms configuration sat at 86% and required a
+    # rate that did not fit the front end at all.
+    gross_bit_rate_bps: 4500000.0
+    airtime_s: 0.0024
+    framing_overhead_bytes: 32
+    code_rate: 0.25

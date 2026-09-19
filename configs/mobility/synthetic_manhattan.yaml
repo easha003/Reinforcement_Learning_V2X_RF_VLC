@@ -1,0 +1,84 @@
+mobility:
+  kind: "synthetic_manhattan"
+  grid:
+    avenues: 6
+    cross_streets: 12
+    avenue_spacing_m: 244.0
+    cross_street_spacing_m: 61.0
+    evaluation_avenues: 4
+    evaluation_cross_streets: 8
+    # One-way alternating streets, two lanes each: the same road width as one
+    # lane in each direction, but both lanes running the same way.  Manhattan
+    # is laid out this way and it is not incidental.  A two-way street can only
+    # carry a green wave at v = 2L/(kC) -- 1.36 m/s for 61 m blocks on a 90 s
+    # cycle -- so every progression speed made the two-way grid *slower*, while
+    # on the one-way grid progression gains 31%.  It also doubles the
+    # same-direction lanes available for overtaking, which took the share of
+    # tagged-pair episodes cut into by a third vehicle from 1.1% to 10.4%.
+    # That is the only blockage mechanism a map cannot predict.
+    lanes_per_direction: 2
+    one_way: true
+    # Lanes are laterally separated so no two vehicles share a line.  Under the
+    # two-way layout that separation is what stopped oncoming traffic sitting
+    # exactly on the optical path, which had produced 94% of all measured
+    # V-VLC blockage; see work plan section 4.6.3.
+    lane_width_m: 3.5
+  network_artifact: null
+  step_s: 0.05
+  speed_limit_mps: 11.18
+  target_densities_veh_per_lane_km: [10.0, 20.0, 30.0]
+  density_tolerance_fraction: 0.05
+  # Cycle matched to block traversal rather than inherited.  A vehicle
+  # arriving at random waits E[wait] = (1-g)^2 C/2, about C/8 at a two-phase
+  # signal: 11.3 s at 90 s against a 5.5 s free-flow block traversal, a 16x
+  # mismatch that left vehicles stopped two-thirds of the time.  At 45 s the
+  # wait is comparable to the traversal.  Progression is deliberately *not*
+  # used with it: at 45 s the per-junction offset L/v is 27% of the cycle, so
+  # the green band walks right around it every four junctions and a platoon
+  # cannot be held together.  Green waves need L/v << C, which is the 90 s
+  # case.
+  signal_cycle_s: 45.0
+  stagger_signal_offsets: true
+  # The live turn distribution.  Applied at every junction a vehicle reaches
+  # before leaving the grid; realized fractions in the published campaign are
+  # 25.0-25.4% left, 49.6-50.3% straight, 24.4-25.1% right.
+  turn_probabilities:
+    left: 0.25
+    straight: 0.50
+    right: 0.25
+  # RESERVED - declared and validated, but no code reads it.
+  #
+  # Intended as an arterial variant: real avenues carry more through-traffic
+  # than side streets, so a vehicle already travelling along an avenue would
+  # draw from this straight-heavy distribution while cross-street traffic kept
+  # the uniform one above.  Applying it would raise mean speed along avenues
+  # and narrow the largest realism gap in the model (work plan section 4.7
+  # item 2, signals staggered rather than progressed).
+  #
+  # Wiring it up changes vehicle trajectories and therefore invalidates every
+  # published trace, so it is a deliberate experimental decision rather than a
+  # cleanup.  Until then this block documents the intent and must not be
+  # mistaken for a knob that currently does anything.
+  straight_heavy_turn_probabilities:
+    left: 0.10
+    straight: 0.80
+    right: 0.10
+  warmup_s: 300.0
+  trace_duration_s: 900.0
+  boundary_arrivals: "poisson"
+  vehicle_classes:
+    - name: "passenger_car"
+      share: 0.90
+      length_m: 4.5
+      width_m: 1.8
+      height_m: 1.5
+    - name: "van_suv"
+      share: 0.07
+      length_m: 5.2
+      width_m: 2.0
+      height_m: 2.0
+    - name: "bus_truck"
+      share: 0.03
+      length_m: 11.0
+      width_m: 2.5
+      height_m: 3.25

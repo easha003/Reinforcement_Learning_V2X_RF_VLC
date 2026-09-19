@@ -1,0 +1,57 @@
+# The full 3GPP TR 38.913 eV2X reference row: 300 B, 3-10 ms, 1e-5.
+#
+# The headline profile in ev2x_300B_3ms_1e-4.yaml takes its miss budget from the
+# 99.99% class of TS 22.186 instead.  This one takes the eV2X row's own 1e-5,
+# and it is reachable -- but only with both media, and only above a density
+# threshold this file exists to record.
+#
+# Four attempts.  One was here until 2026-08-31, predating the amendment that
+# moved the headline profile to three, and was never a candidate: collision
+# alone leaves a 2-6% floor on a single attempt, four orders over budget.
+# Four is the count that reaches 1e-5, and it costs 2.0 ms of the 2.9 ms the
+# 3 ms deadline leaves after the pre-decision lead -- so this sits at the
+# *tight* end of the standard's range, deliberately.  The deadline is not what
+# binds.  Relaxing to 10 ms buys room for nineteen attempts in time and changes
+# nothing, because the mode-2 pool supplies 400 (subchannel, slot) resources per
+# 100 ms generation period whatever the deadline is, and n vehicles each
+# claiming N of them need n*N <= 400.
+#
+# **The pool is what binds, and the second medium is what relieves it.**  At
+# full radio use four attempts claim 0.47 of the pool at rho = 10, 1.08 at
+# rho = 20 and 1.62 at rho = 30 -- the two denser conditions oversubscribed, so
+# the radio alone cannot buy the reliability it needs there.  Sending the
+# packets with a short clear optical path by light alone returns their share:
+# the offered load falls, demand drops to 0.68 and 0.80, and the radio can
+# afford the attempts after all.  Measured at the resulting equilibrium:
+#
+#   rho = 10:  radio alone 2.02e-06                      -> second medium REDUNDANT
+#   rho = 20:  radio alone 1.38e-05, both 1.67e-06       -> BOTH REQUIRED
+#   rho = 30:  radio alone 4.46e-05, both 1.62e-06       -> BOTH REQUIRED
+#
+# Light alone is never a candidate at any density: 22-54% of packets have no
+# usable optical path at all, a geometric floor no transmit power reaches.
+#
+# So the threshold is near rho = 17-18, where the pool stops affording four
+# attempts at full load.  Below it the radio carries the service by itself;
+# above it neither medium meets the row alone and the pair meets it at an
+# activation cost of 1.0 to 1.1.
+#
+# Recorded here rather than in a paper draft because this file is what the
+# loader reads, and a service profile whose comment disagreed with the
+# measurement would make every artifact stamped with it a claim nobody checked.
+
+project:
+  experiment: "ev2x_300B_3ms_1e-5"
+  description: "TR 38.913 eV2X row, met by the hybrid above the density threshold"
+
+service:
+  payload_bytes: 300
+  generation_period_s: 0.1
+  deadline_s: 0.003
+  miss_budget: 0.00001
+  predecision_lead_s: 0.0001
+  harq_enabled: false
+  rf_attempts_per_packet: 4
+  vlc_attempts_per_packet: 1
+  dup_simultaneous: true
+  rf_resource_assumption: "pre_reserved"

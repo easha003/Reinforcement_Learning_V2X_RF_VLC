@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hybrid-rf-vlc-rl"
+version = "0.1.0"
+description = "Mean-field reinforcement learning for constrained RF/VLC resource allocation in V2X networks"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "Proprietary research software" }
+authors = [{ name = "Eashraque" }]
+dependencies = [
+  "numpy>=2.0,<2.5",
+  "pydantic>=2.7,<3",
+  "PyYAML>=6.0,<7",
+  "rich>=13.7,<15",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+mobility = [
+  "pyarrow>=17,<20",
+  "shapely>=2.0,<3",
+]
+training = [
+  "gymnasium>=1.0,<2",
+  "torch>=2.4,<3",
+]
+analysis = [
+  "matplotlib>=3.9,<4",
+  "pandas>=2.2,<3",
+  "seaborn>=0.13,<1",
+  "statsmodels>=0.14,<1",
+]
+dev = [
+  "hypothesis>=6.100,<7",
+  "mypy>=1.11,<2",
+  "pytest>=8.3,<10",
+  "pytest-cov>=5,<8",
+  "ruff>=0.8,<1",
+  "types-PyYAML>=6.0,<7",
+]
+
+[project.scripts]
+hybrid-v2x-rl = "hybrid_v2x_rl.cli:app"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hybrid_v2x_rl = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+xfail_strict = true
+markers = [
+  "integration: requires external tools or multiple project modules",
+  "statistical: exercises repeated stochastic simulations",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["hybrid_v2x_rl"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "B",
+  "E",
+  "F",
+  "I",
+  "N",
+  "UP",
+  "W",
+]
+ignore = [
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["N802"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["hybrid_v2x_rl"]
+strict = true
+warn_unreachable = true
+show_error_codes = true

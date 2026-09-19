@@ -1,0 +1,42 @@
+rf:
+  enabled: true
+  carrier_hz: 5900000000.0
+  bandwidth_hz: 10000000.0
+  subcarrier_spacing_hz: 30000.0
+  slot_s: 0.0005
+  # 10 MHz at 30 kHz SCS is 24 RB (TS 38.101-1 Table 5.3.2-1).
+  resource_blocks: 24
+  # 16QAM, chosen to buy time rather than throughput.  The link carries 34-56 dB
+  # of margin over what decoding needs across the whole pair window (M3), and
+  # the profile was spending none of it.  16QAM costs about 6 dB and halves the
+  # allocation from two slots to one, which is what makes three hopped
+  # retransmissions fit inside the 3 ms deadline.
+  #
+  # The trade is deliberate and one-directional: RF failure here is
+  # collision-dominated by two to four orders of magnitude, so spending margin
+  # on attempts attacks the mechanism that actually fails and spending it on a
+  # lower-order modulation would not.
+  modulation: "16qam"
+  # AGC symbol, transmit/receive guard symbol, PSSCH DMRS, and PSCCH.
+  resource_element_overhead: 0.40
+  tx_power_dbm: 23.0
+  antenna_height_m: 1.5
+  resource_mode: "nr_sidelink_mode2"
+  opportunity: "pre_reserved"
+  propagation_family: "3gpp_tr_37_885_urban_grid"
+  spatially_correlated_shadowing: true
+  temporally_correlated_fading: true
+  calibration_artifact: "artifacts/calibration/rf/mode2-v1"
+  timing:
+    # One 0.5-ms slot per attempt at 16QAM.  24 RB at 30 kHz SCS gives 2,419
+    # data resource elements per slot after the declared 40% overhead, so
+    # 9,677 coded bits against the 8,352 a 348-byte block needs at rate 1/3 --
+    # it fits with headroom where QPSK needed two slots for the same block.
+    #
+    # Airtime is now PER ATTEMPT.  Three attempts cost 1.5 ms, concurrent with
+    # the optical leg's 2.4 ms, inside the 2.9 ms the deadline leaves after the
+    # pre-decision lead.
+    gross_bit_rate_bps: 18000000.0
+    airtime_s: 0.0005
+    framing_overhead_bytes: 48
+    code_rate: 0.333333

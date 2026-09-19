@@ -1,0 +1,16 @@
+evaluation:
+  profile: "ultra_reliability"
+  policies:
+    - "always_dup"
+    - "forecast_aware_gate"
+    - "primal_dual_ppo"
+    - "oracle"
+  min_packets_per_policy_density: 10000000
+  min_trajectory_pair_clusters: 200
+  confidence_level: 0.95
+  one_sided_upper_bound: true
+  interval_method: "trajectory_block_bootstrap"
+  bootstrap_replicates: 20000
+  matched_across_policies: true
+  report_raw_counts: true
+  require_upper_bound_below_budget: true
