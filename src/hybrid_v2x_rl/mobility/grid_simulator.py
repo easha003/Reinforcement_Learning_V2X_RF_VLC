@@ -829,8 +829,10 @@ class GridMobilitySimulator:
             for index, vehicle in enumerate(group):
                 if index + 1 < len(group):
                     leader = group[index + 1]
-                    gap = leader.offset_m - vehicle.offset_m - leader.vehicle_type.length_m
-                    gaps[vehicle.vehicle_id] = (gap, leader.speed_mps)
+                    same_edge_gap = (
+                        leader.offset_m - vehicle.offset_m - leader.vehicle_type.length_m
+                    )
+                    gaps[vehicle.vehicle_id] = (same_edge_gap, leader.speed_mps)
                     continue
 
                 following = (
@@ -950,6 +952,8 @@ class GridMobilitySimulator:
         what makes a footprint-level admission test affordable at 20 Hz.
         """
 
+        approach: GridEdge | None
+        following: GridEdge | None
         edge = vehicle.edge
         if edge.to_junction == junction:
             approach, approach_lane = edge, vehicle.lane_index

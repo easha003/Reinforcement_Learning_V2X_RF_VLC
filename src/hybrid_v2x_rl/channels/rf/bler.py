@@ -122,7 +122,7 @@ class LinkBudget:
 
     @property
     def snr_linear(self) -> float:
-        return 10.0 ** (self.snr_db / 10.0)
+        return float(10.0 ** (self.snr_db / 10.0))
 
 
 def shannon_capacity(snr_linear: float) -> float:

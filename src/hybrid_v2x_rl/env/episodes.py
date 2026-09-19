@@ -25,8 +25,9 @@ import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-import pyarrow.parquet as pq
+import pyarrow.parquet as pq  # type: ignore[import-untyped]
 
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.geometry.spatial_index import SpatialIndex
@@ -58,15 +59,15 @@ class VehiclePose:
         "length_m", "width_m", "height_m",
     )
 
-    def __init__(self, row: dict) -> None:
-        self.vehicle_id = row["vehicle_id"]
-        self.x_m = row["x_m"]
-        self.y_m = row["y_m"]
-        self.heading_rad = row["heading_rad"]
-        self.speed_mps = row["speed_mps"]
-        self.length_m = row["length_m"]
-        self.width_m = row["width_m"]
-        self.height_m = row["height_m"]
+    def __init__(self, row: dict[str, Any]) -> None:
+        self.vehicle_id = str(row["vehicle_id"])
+        self.x_m = float(row["x_m"])
+        self.y_m = float(row["y_m"])
+        self.heading_rad = float(row["heading_rad"])
+        self.speed_mps = float(row["speed_mps"])
+        self.length_m = float(row["length_m"])
+        self.width_m = float(row["width_m"])
+        self.height_m = float(row["height_m"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,8 +117,8 @@ class TraceSource:
         )
 
 
-def _pair_windows(path: Path) -> dict[str, list[tuple[str, str, float, float]]]:
-    """Tagged-pair windows, bucketed by transmitter so a frame lookup is cheap."""
+def _pair_windows(path: Path) -> list[tuple[str, str, str, float, float]]:
+    """Tagged-pair windows in their stored order."""
 
     table = pq.read_table(
         path / "pairs.parquet",

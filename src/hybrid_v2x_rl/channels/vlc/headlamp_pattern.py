@@ -122,7 +122,9 @@ class LambertianPattern:
         off_axis = math.hypot(horizontal_angle_rad, vertical_angle_rad)
         if off_axis >= 0.5 * math.pi:
             return 0.0
-        return self.peak_intensity_w_per_sr * math.cos(off_axis) ** self.lambertian_order
+        return float(
+            self.peak_intensity_w_per_sr * math.cos(off_axis) ** self.lambertian_order
+        )
 
     def covers(self, horizontal_angle_rad: float, vertical_angle_rad: float) -> bool:
         """Everywhere in the forward hemisphere, which is the idealization.

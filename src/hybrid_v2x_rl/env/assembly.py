@@ -15,6 +15,9 @@ configuration field, it is a parameter that escaped the provenance table.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand, headline_parameters
@@ -24,7 +27,11 @@ from hybrid_v2x_rl.channels.vlc.model import VVLCChannel
 from hybrid_v2x_rl.channels.vlc.noise import CLEAR_DAY, CLEAR_NIGHT, AmbientCondition
 from hybrid_v2x_rl.channels.vlc.receiver import OpticalReceiver
 from hybrid_v2x_rl.config.models import BITS_PER_RESOURCE_ELEMENT, ProjectConfig
+from hybrid_v2x_rl.core.geometry import OrientedRectangle
 from hybrid_v2x_rl.env.packet import PacketLifecycle, Timing
+
+if TYPE_CHECKING:
+    from hybrid_v2x_rl.env.rollout import Rollout
 
 _AMBIENT: dict[str, AmbientCondition] = {
     "clear_night": CLEAR_NIGHT,
@@ -133,11 +140,11 @@ def build_lifecycle(
 def build_rollout(
     config: ProjectConfig,
     *,
-    buildings,
+    buildings: Iterable[OrientedRectangle],
     root_seed: int = 0,
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
-):
+) -> Rollout:
     """A rollout wired to this profile, including the receiver's acceptance cone.
 
     Imported lazily so :mod:`hybrid_v2x_rl.env.rollout` can import this module for its

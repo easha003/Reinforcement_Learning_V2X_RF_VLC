@@ -204,7 +204,7 @@ def rician_k_linear(state: RFPropagationState) -> float:
     """
 
     if state is RFPropagationState.LOS:
-        return 10.0 ** (LOS_RICIAN_K_DB / 10.0)
+        return float(10.0 ** (LOS_RICIAN_K_DB / 10.0))
     return 0.0
 
 
@@ -252,7 +252,10 @@ class FadingProcess:
             self.rng.standard_normal(self.subchannel_count)
             + 1j * self.rng.standard_normal(self.subchannel_count)
         ) / math.sqrt(2.0)
-        return self._cholesky @ white
+        cholesky = self._cholesky
+        if cholesky is None:  # pragma: no cover - initialized in __post_init__
+            raise FadingError("fading correlation matrix is not initialized")
+        return cholesky @ white
 
     def advance(
         self,

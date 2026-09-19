@@ -92,10 +92,10 @@ class PolicyStatistics:
     """
 
     rate: ClusteredRate = field(default_factory=ClusteredRate)
-    causes: Counter = field(default_factory=Counter)
+    causes: Counter[str] = field(default_factory=Counter)
     #: How often the oracle-style chooser picked each action. Constant for a
     #: fixed baseline, and the whole result for the oracle.
-    choices: Counter = field(default_factory=Counter)
+    choices: Counter[str] = field(default_factory=Counter)
 
     def observe(
         self, outcome: PacketOutcome, expected_failure: float, cluster_id: str = ""

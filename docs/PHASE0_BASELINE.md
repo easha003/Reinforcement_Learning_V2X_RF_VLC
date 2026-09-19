@@ -44,20 +44,20 @@ Commands were run from the repository root using the local environment.
 | `hybrid-v2x-rl doctor --project-root . --json` | Pass |
 | `python -m pip check` | Pass; no broken requirements |
 | `ruff check src tests scripts` | Pass |
-| `pytest -q -p no:cacheprovider` | 813 passed, 27 skipped in 504.07 seconds |
-| `mypy src` | Known debt: 32 errors in 11 files |
+| `pytest -q -p no:cacheprovider` | 814 passed, 26 skipped in 490.65 seconds |
+| `mypy src` | Pass; no issues in 73 source files |
 
-The 27 skips are expected at this point:
+The 26 skips are expected at this point:
 
 - Tests that require the generated mobility campaign
 - Tests that require training caches or evaluation artifacts
-- One provenance test that requires the initial Git commit
 
 No inherited unit test failed.
 
-## Known static-typing debt
+## Static-typing gate
 
-Strict mypy currently reports 32 inherited errors across these areas:
+The 32 inherited strict-mypy errors in 11 files have been cleared. The fixes
+covered:
 
 - RF/VLC scalar return typing
 - PyArrow's missing inline type information
@@ -66,9 +66,9 @@ Strict mypy currently reports 32 inherited errors across these areas:
 - RF fading optional-state narrowing
 - Rollout, assembly, perception, and campaign annotations
 
-These errors are recorded rather than silently ignored. They do not represent
-test failures, but they should be cleared before the new mean-field environment
-and agent APIs make the affected interfaces larger.
+Strict mypy now passes across all 73 source files. This closes the known
+static-typing debt before the new mean-field environment and agent APIs enlarge
+the affected interfaces.
 
 ## Trace and artifact policy
 
@@ -143,6 +143,5 @@ contract and implemented through the population action model in Phase 3.
 1. Freeze the Phase 1 environment contract while the full campaign is being
    prepared.
 2. Generate and verify all 21 raw mobility traces from a clean commit.
-3. Clear the inherited mypy debt before adding new environment interfaces.
-4. Begin Phase 2 only after trace counts, splits, and lifecycle semantics are
+3. Begin Phase 2 only after trace counts, splits, and lifecycle semantics are
    confirmed against the generated artifacts.

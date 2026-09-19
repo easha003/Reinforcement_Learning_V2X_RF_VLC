@@ -21,7 +21,7 @@ comparison rather than two separate experiments.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -32,7 +32,7 @@ from hybrid_v2x_rl.channels.rf.pathloss_37885 import blockage_mean_db, blockage_
 from hybrid_v2x_rl.channels.rf.shadowing import ShadowingProcess
 from hybrid_v2x_rl.channels.vlc.model import VLCChannelRequest, VLCPacketRandomness
 from hybrid_v2x_rl.core.enums import RFPropagationState
-from hybrid_v2x_rl.core.geometry import Segment
+from hybrid_v2x_rl.core.geometry import OrientedRectangle, Segment
 from hybrid_v2x_rl.core.link_endpoints import (
     DEFAULT_RF_ANTENNA_HEIGHT_M,
     optical_link_path,
@@ -40,6 +40,7 @@ from hybrid_v2x_rl.core.link_endpoints import (
 )
 from hybrid_v2x_rl.core.pair_geometry import DEFAULT_FOV_HALF_ANGLE_RAD, pair_geometry
 from hybrid_v2x_rl.core.randomness import derive_seed
+from hybrid_v2x_rl.env.episodes import VehiclePose
 from hybrid_v2x_rl.env.packet import Action, PacketLifecycle, PacketOutcome, PacketTape
 from hybrid_v2x_rl.geometry.rf_visibility import classify_path
 from hybrid_v2x_rl.geometry.spatial_index import SpatialIndex
@@ -113,23 +114,21 @@ class Rollout:
     """Replays a campaign through the lifecycle under a chosen policy."""
 
     lifecycle: PacketLifecycle
-    buildings: Sequence
+    buildings: Sequence[OrientedRectangle]
     root_seed: int = 0
     fov_half_angle_rad: float = DEFAULT_FOV_HALF_ANGLE_RAD
     sensed_fraction: float = DEFAULT_SENSED_FRACTION
-    shadowing: ShadowingProcess = field(default=None)  # type: ignore[assignment]
-    fading: FadingProcess = field(default=None)  # type: ignore[assignment]
+    shadowing: ShadowingProcess = field(init=False)
+    fading: FadingProcess = field(init=False)
     _last_time_s: dict[str, float] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        if self.shadowing is None:
-            self.shadowing = ShadowingProcess(rng=np.random.default_rng(self.root_seed))
-        if self.fading is None:
-            self.fading = FadingProcess(
-                rng=np.random.default_rng(self.root_seed + 1),
-                carrier_hz=self.lifecycle.rf.carrier_hz,
-                subchannel_separations_hz=self._hop_offsets_hz(),
-            )
+        self.shadowing = ShadowingProcess(rng=np.random.default_rng(self.root_seed))
+        self.fading = FadingProcess(
+            rng=np.random.default_rng(self.root_seed + 1),
+            carrier_hz=self.lifecycle.rf.carrier_hz,
+            subchannel_separations_hz=self._hop_offsets_hz(),
+        )
 
     def _hop_offsets_hz(self) -> tuple[float, ...]:
         """Where in the band each granted attempt lands.
@@ -152,7 +151,7 @@ class Rollout:
         )
 
     def _tape(
-        self, trace_id: str, pair_id: str, index: int, fading_gains: Sequence[float]
+        self, trace_id: str, pair_id: str, index: int, fading_gains: Iterable[float]
     ) -> PacketTape:
         """A tape derived from packet identity so it cannot drift with order."""
 
@@ -182,9 +181,9 @@ class Rollout:
         index: int,
         density: float,
         time_s: float,
-        transmitter,
-        receiver,
-        neighbours: Sequence,
+        transmitter: VehiclePose,
+        receiver: VehiclePose,
+        neighbours: Sequence[VehiclePose],
         index_of_frame: SpatialIndex,
         choose: ActionChooser,
         counterfactual: bool = False,

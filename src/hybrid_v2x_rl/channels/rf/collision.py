@@ -260,7 +260,7 @@ def collision_probability(
 
     hidden = hidden_contenders(neighbour_count, sensed_fraction, parameters)
     survival = (1.0 - 1.0 / parameters.candidate_resources) ** hidden
-    return 1.0 - survival
+    return float(1.0 - survival)
 
 
 def half_duplex_probability(parameters: CollisionParameters) -> float:

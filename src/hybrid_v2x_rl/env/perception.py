@@ -43,10 +43,13 @@ out or were never seen, which is the point.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from hybrid_v2x_rl.channels.rf.collision import CollisionParameters, channel_busy_ratio
+from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.enums import Action as ObservedAction
+from hybrid_v2x_rl.core.enums import Link
 from hybrid_v2x_rl.core.geometry import Point, Segment
 from hybrid_v2x_rl.core.intersection_context import JunctionGrid, intersection_context
 from hybrid_v2x_rl.env.episodes import PairInstant
@@ -54,7 +57,7 @@ from hybrid_v2x_rl.env.packet import Action
 from hybrid_v2x_rl.observation.blockage import BlockerShape, blockage_probability
 from hybrid_v2x_rl.observation.builder import ObservationBuilder, PairObservationInputs
 from hybrid_v2x_rl.observation.forecast import ConstantVelocityForecaster, PredictedState
-from hybrid_v2x_rl.observation.link_state import Link, LinkStateTracker
+from hybrid_v2x_rl.observation.link_state import LinkStateTracker
 from hybrid_v2x_rl.observation.sensing import SensorModel, sense_frame
 from hybrid_v2x_rl.observation.tracks import TrackStore
 
@@ -188,7 +191,9 @@ class Perception:
         self._neighbours = {}
         self._sensed_at = instant.time_s
 
-    def _cells_near(self, x0: float, y0: float, x1: float, y1: float, margin_m: float):
+    def _cells_near(
+        self, x0: float, y0: float, x1: float, y1: float, margin_m: float
+    ) -> Iterator[PredictedState]:
         """Forecast states in every cell the box touches."""
 
         lo_x = int((min(x0, x1) - margin_m) // _CELL_M)
@@ -334,12 +339,14 @@ class Perception:
         self._links.pop(pair_id, None)
 
 
-def build_perception(config, *, root_seed: int = 0) -> Perception:
+def build_perception(config: ProjectConfig, *, root_seed: int = 0) -> Perception:
     """Assemble the causal view from a resolved configuration."""
 
     from hybrid_v2x_rl.env.assembly import build_rf_channel
 
     grid = config.mobility.grid
+    if grid is None:  # pragma: no cover - rejected by configuration validation
+        raise ValueError("perception requires a configured mobility grid")
     return Perception(
         sensor=SensorModel.from_config(config.observation),
         tracks=TrackStore.from_config(config.observation),

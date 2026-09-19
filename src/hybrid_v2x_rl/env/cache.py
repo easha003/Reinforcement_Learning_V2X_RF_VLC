@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 
@@ -149,7 +150,7 @@ class TransitionCache:
     episode: np.ndarray
     #: ``[packets]`` whether this row ends its episode.
     final: np.ndarray
-    manifest: dict
+    manifest: dict[str, Any]
 
     @property
     def packets(self) -> int:
@@ -171,7 +172,7 @@ class TransitionCache:
         manifest_path = directory / "manifest.json"
         if not manifest_path.exists():
             raise CacheError(f"no cache manifest at {manifest_path}")
-        manifest = json.loads(manifest_path.read_text())
+        manifest: dict[str, Any] = json.loads(manifest_path.read_text())
 
         if manifest.get("format_version") != CACHE_FORMAT_VERSION:
             raise CacheError(
@@ -200,7 +201,7 @@ class TransitionCache:
             path = directory / f"{name}.npy"
             if not path.exists():
                 raise CacheError(f"cache is missing {path.name}")
-            return np.load(path, mmap_mode="r")
+            return cast(np.ndarray, np.load(path, mmap_mode="r"))
 
         return cls(
             trace=read("trace"), risk=read("risk"), delivered=read("delivered"),
@@ -212,10 +213,10 @@ class TransitionCache:
     def write(
         directory: Path, *, trace: np.ndarray, risk: np.ndarray, delivered: np.ndarray,
         quality: np.ndarray, time_s: np.ndarray, episode: np.ndarray, final: np.ndarray,
-        manifest: dict,
+        manifest: dict[str, Any],
     ) -> None:
         directory.mkdir(parents=True, exist_ok=True)
-        arrays = {
+        arrays: dict[str, np.ndarray] = {
             "trace": np.asarray(trace, dtype=np.float32),
             "risk": np.asarray(risk, dtype=np.float32),
             "delivered": np.asarray(delivered, dtype=np.uint8),
