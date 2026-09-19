@@ -88,14 +88,14 @@ Create a clean, reproducible starting point in the extension repository without 
 
 ### Tasks
 
-- [ ] Confirm that `origin` points to `Reinforcement_Learning_V2X_RF_VLC`.
-- [ ] Review the extension repository structure and package name.
-- [ ] Define the supported Python version and install the project in an isolated environment.
-- [ ] Run all inherited unit and integration tests before changing behavior.
-- [ ] Record the baseline test result and dependency versions.
-- [ ] Configure external paths for raw traces, caches, checkpoints, and results.
-- [ ] Verify `.gitignore` coverage for generated and machine-specific files.
-- [ ] Create the first clean baseline commit when the repository contents are verified.
+- [x] Confirm that `origin` points to `Reinforcement_Learning_V2X_RF_VLC`.
+- [x] Review the extension repository structure and package name.
+- [x] Define the supported Python version and install the project in an isolated environment.
+- [x] Run all inherited unit and integration tests before changing behavior.
+- [x] Record the baseline test result and dependency versions.
+- [x] Configure paths for raw traces, caches, checkpoints, and results outside Git tracking.
+- [x] Verify `.gitignore` coverage for generated and machine-specific files.
+- [x] Create the first clean baseline commit when the repository contents are verified.
 
 ### Deliverables
 

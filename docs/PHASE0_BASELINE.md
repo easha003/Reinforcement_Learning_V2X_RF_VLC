@@ -107,6 +107,30 @@ This produces 21 traces across densities 10, 20, and 30 vehicles per
 lane-kilometer using disjoint train, validation, and test replicates. The
 campaign is expected to require approximately 6 GiB and must remain untracked.
 
+## Post-commit verification
+
+The committed baseline was verified before any full trace campaign was
+started:
+
+- Baseline commit: `9d33b1d`
+- Remote branch: `origin/main`
+- Provenance tests: 6 passed
+- Trace-generation smoke test: Gate 1 passed for train, validation, and test
+- Smoke density: 10 vehicles per lane-kilometer
+- Smoke duration: 60 seconds per trace after a 5-second warm-up
+- Smoke configuration hash:
+  `b852419b64d5f08273399abdb422a7f622ba24aa74c41e01582be563195caad0`
+
+| Split | Pair episodes | Usable episodes | Realized density |
+|---|---:|---:|---:|
+| Train | 805 | 767 | 9.9914 |
+| Validation | 803 | 767 | 9.9914 |
+| Test | 804 | 764 | 9.9914 |
+
+All 27 Gate-1 checks passed across the three smoke traces. The temporary
+31 MiB smoke campaign was removed after verification; it is not a training
+dataset and was never added to Git.
+
 ## Current modeling boundary
 
 The inherited code still exposes the original three actions: `RF`, `VLC`, and
@@ -116,9 +140,9 @@ contract and implemented through the population action model in Phase 3.
 
 ## Next gate
 
-1. Create and push the clean baseline commit.
-2. Re-run the provenance test against the committed tree.
-3. Generate and verify the raw mobility campaign.
-4. Clear or formally schedule the inherited mypy debt.
-5. Begin the Phase 1 environment contract only after the raw trace location
-   and lifecycle semantics are confirmed.
+1. Freeze the Phase 1 environment contract while the full campaign is being
+   prepared.
+2. Generate and verify all 21 raw mobility traces from a clean commit.
+3. Clear the inherited mypy debt before adding new environment interfaces.
+4. Begin Phase 2 only after trace counts, splits, and lifecycle semantics are
+   confirmed against the generated artifacts.
