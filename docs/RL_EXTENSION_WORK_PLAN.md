@@ -295,13 +295,22 @@ Per-agent accounting sums exactly to population totals for all nine actions, and
 
 ## Phase 4 — Shared RF-pool dynamics
 
+Status (2026-09-20): **in progress**. The Phase 4 input boundary now accepts
+only a complete, conservation-audited population action ledger and snapshots
+the current frame's canonical per-pair RF reservations. Its unclipped
+``offered_rf_attempts`` is exactly contract quantity ``D_t``; VLC-only and empty
+populations contribute zero, and each new joint action produces a fresh demand
+without carrying an earlier reservation forward. Mapping this demand to pool
+utilization, measured CBR, and the declared collision sensitivity bands remains
+the next task.
+
 ### Objective
 
 Make RF reliability depend on the joint actions selected in the current frame.
 
 ### Tasks
 
-- [ ] Recompute offered RF load after all population actions are known.
+- [x] Recompute offered RF load after all population actions are known.
 - [ ] Map offered load to pool utilization, CBR, and collision probability using the validated RF model.
 - [ ] Combine contention risk with policy-independent RF propagation state.
 - [ ] Generate matched/counterfactual randomness where required for fair policy comparison.
@@ -661,9 +670,9 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phases 2 and 3 are complete. The Phase 3 ledger now provides authoritative
-nine-action mapping, hardware-only masks, deterministic lifecycle handling,
-exact per-agent resource rows, population totals, and a fail-closed conservation
-audit. Begin Phase 4 by defining the action-coupled RF-pool boundary that consumes
-the ledger's current-frame offered demand ``D_t``; then test empty, light-load,
-saturation, and overload behavior before integrating propagation outcomes.
+Phases 2 and 3 are complete, and Phase 4 has begun with an immutable,
+action-coupled RF-demand boundary that consumes the audited current-frame
+ledger. Implement the next Phase 4 task by mapping its unclipped ``D_t`` to pool
+utilization, clipped CBR, and per-attempt collision probability across the
+configured sensing-reliability bands. Preserve the existing analytical-model
+scope and do not integrate propagation outcomes yet.
