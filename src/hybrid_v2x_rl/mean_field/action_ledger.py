@@ -5,7 +5,10 @@ Consequently, the aggregation boundary accepts only exact ``PolicyAction``
 members.  It has no channel state or outcome inputs: every committed RF
 attempt contributes to current offered demand, including reservations from
 flows whose physical endpoints overlap. RF use, VLC use, duplication, cost,
-and reward are all derived from that same authoritative action record.
+and reward are all derived from that same authoritative action record. A frame
+is rebuilt only from its current actions: ``VLC`` records an explicit RF
+reservation release, so no RF or DUP reservation can leak in from an earlier
+frame.
 """
 
 from __future__ import annotations
@@ -68,6 +71,12 @@ class PairActionReservation:
     def duplicates(self) -> bool:
         return action_resources(self.action).duplicates
 
+    @property
+    def rf_reservation_released(self) -> bool:
+        """Whether this action returns the pair's current-frame RF reservation."""
+
+        return not action_resources(self.action).uses_rf
+
     def account(self, resource_map: ActionResourceMap) -> PairResourceAccounting:
         """Materialize this packet's resources, configured cost, and reward."""
 
@@ -80,6 +89,7 @@ class PairActionReservation:
             uses_rf=self.uses_rf,
             uses_vlc=self.uses_vlc,
             duplicates=self.duplicates,
+            rf_reservation_released=self.rf_reservation_released,
             activation_cost=activation_cost,
             reward=resource_map.reward(self.action),
         )
@@ -96,6 +106,7 @@ class PairResourceAccounting:
     uses_rf: bool
     uses_vlc: bool
     duplicates: bool
+    rf_reservation_released: bool
     activation_cost: float
     reward: float
 
@@ -115,7 +126,12 @@ class PairResourceAccounting:
             or self.vlc_activations not in (0, 1)
             or any(
                 type(flag) is not bool
-                for flag in (self.uses_rf, self.uses_vlc, self.duplicates)
+                for flag in (
+                    self.uses_rf,
+                    self.uses_vlc,
+                    self.duplicates,
+                    self.rf_reservation_released,
+                )
             )
         ):
             raise ActionAggregationError(
@@ -129,6 +145,7 @@ class PairResourceAccounting:
             spec.uses_rf,
             spec.uses_vlc,
             spec.duplicates,
+            not spec.uses_rf,
         )
         actual = (
             self.reserved_rf_attempts,
@@ -136,6 +153,7 @@ class PairResourceAccounting:
             self.uses_rf,
             self.uses_vlc,
             self.duplicates,
+            self.rf_reservation_released,
         )
         if actual != expected:
             raise ActionAggregationError(
@@ -306,6 +324,25 @@ class FrameActionLedger:
     @property
     def duplicated_pairs(self) -> int:
         return sum(record.duplicates for record in self.pair_accounting)
+
+    @property
+    def rf_reservation_releases_by_pair(self) -> tuple[tuple[str, bool], ...]:
+        """Explicit current-frame release decision for every active pair."""
+
+        return tuple(
+            (record.pair_id, record.rf_reservation_released)
+            for record in self.pair_accounting
+        )
+
+    @property
+    def released_rf_pair_ids(self) -> tuple[str, ...]:
+        """Pairs whose current action leaves no reservation in RF demand."""
+
+        return tuple(
+            record.pair_id
+            for record in self.pair_accounting
+            if record.rf_reservation_released
+        )
 
     @property
     def activation_costs_by_pair(self) -> tuple[tuple[str, float], ...]:

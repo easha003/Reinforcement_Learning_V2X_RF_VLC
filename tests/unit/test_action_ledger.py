@@ -143,6 +143,13 @@ def test_mixed_population_aggregates_committed_attempts_in_frame_order() -> None
     assert ledger.rf_using_pairs == 3
     assert ledger.vlc_using_pairs == 2
     assert ledger.duplicated_pairs == 1
+    assert ledger.rf_reservation_releases_by_pair == (
+        ("pair-a", True),
+        ("pair-b", False),
+        ("pair-c", False),
+        ("pair-d", False),
+    )
+    assert ledger.released_rf_pair_ids == ("pair-a",)
     assert ledger.activation_costs_by_pair == (
         ("pair-a", 1.0),
         ("pair-b", 1.0),
@@ -201,6 +208,19 @@ def test_all_nine_actions_use_the_authoritative_attempt_counts() -> None:
         True,
         True,
     )
+    assert tuple(
+        record.rf_reservation_released for record in ledger.pair_accounting
+    ) == (
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+    )
     assert tuple(record.activation_cost for record in ledger.pair_accounting) == (
         1.0,
         1.0,
@@ -252,6 +272,11 @@ def test_vlc_only_population_contributes_zero_rf_demand() -> None:
     assert ledger.duplicated_pairs == 0
     assert ledger.total_vlc_activations == 2
     assert ledger.total_activation_cost == 2.0
+    assert ledger.rf_reservation_releases_by_pair == (
+        ("pair-a", True),
+        ("pair-b", True),
+    )
+    assert ledger.released_rf_pair_ids == ("pair-a", "pair-b")
 
 
 def test_shared_physical_endpoint_does_not_merge_pair_reservations() -> None:
@@ -284,6 +309,8 @@ def test_empty_population_has_valid_zero_demand() -> None:
     assert ledger.rf_using_pairs == 0
     assert ledger.vlc_using_pairs == 0
     assert ledger.duplicated_pairs == 0
+    assert ledger.rf_reservation_releases_by_pair == ()
+    assert ledger.released_rf_pair_ids == ()
     assert ledger.activation_costs_by_pair == ()
     assert ledger.rewards_by_pair == ()
     assert ledger.total_activation_cost == 0.0
@@ -336,6 +363,43 @@ def test_ledger_retains_reproducible_frame_identity() -> None:
     assert ledger.trace_id == TRACE_ID
     assert ledger.frame_index == 7
     assert ledger.time_s == pytest.approx(0.7)
+
+
+def test_current_vlc_action_releases_a_prior_frame_rf_reservation() -> None:
+    endpoints = (("pair-a", "veh-1", "veh-2"),)
+    previous_frame = _frame(endpoints, index=2, time_s=0.2)
+    current_frame = _frame(endpoints, index=3, time_s=0.3)
+
+    previous = _ledger(previous_frame, {"pair-a": PolicyAction.DUP_4})
+    current = _ledger(current_frame, {"pair-a": PolicyAction.VLC})
+
+    assert previous.total_reserved_rf_attempts == 4
+    assert previous.released_rf_pair_ids == ()
+    assert not previous.pair_accounting[0].rf_reservation_released
+    assert current.total_reserved_rf_attempts == 0
+    assert current.released_rf_pair_ids == ("pair-a",)
+    assert current.pair_accounting[0].rf_reservation_released
+
+
+def test_rf_and_dup_actions_commit_reservations_without_early_release() -> None:
+    frame = _frame(
+        (
+            ("pair-a", "veh-1", "veh-2"),
+            ("pair-b", "veh-3", "veh-4"),
+        )
+    )
+
+    ledger = _ledger(
+        frame,
+        {"pair-a": PolicyAction.RF_1, "pair-b": PolicyAction.DUP_4},
+    )
+
+    assert ledger.reserved_rf_attempts_by_pair == (("pair-a", 1), ("pair-b", 4))
+    assert ledger.rf_reservation_releases_by_pair == (
+        ("pair-a", False),
+        ("pair-b", False),
+    )
+    assert ledger.released_rf_pair_ids == ()
 
 
 def test_direct_records_reject_invalid_identity_and_unresolved_action() -> None:
@@ -434,6 +498,7 @@ def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> No
     assert valid.reserved_rf_attempts == 2
     assert valid.vlc_activations == 1
     assert valid.uses_rf and valid.uses_vlc and valid.duplicates
+    assert not valid.rf_reservation_released
     assert valid.activation_cost == 3.0
     assert valid.reward == -3.0
 
@@ -446,6 +511,7 @@ def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> No
             uses_rf=True,
             uses_vlc=True,
             duplicates=True,
+            rf_reservation_released=False,
             activation_cost=3.0,
             reward=-3.0,
         )
@@ -458,6 +524,21 @@ def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> No
             uses_rf=True,
             uses_vlc=True,
             duplicates=True,
+            rf_reservation_released=False,
             activation_cost=3.0,
             reward=-2.0,
+        )
+
+    with pytest.raises(ActionAggregationError, match="authoritative"):
+        PairResourceAccounting(
+            pair_id="pair-a",
+            action=PolicyAction.VLC,
+            reserved_rf_attempts=0,
+            vlc_activations=1,
+            uses_rf=False,
+            uses_vlc=True,
+            duplicates=False,
+            rf_reservation_released=False,
+            activation_cost=1.0,
+            reward=-1.0,
         )
