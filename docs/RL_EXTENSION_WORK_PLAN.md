@@ -256,6 +256,8 @@ rebuilt from current actions so an earlier RF or DUP reservation cannot carry
 forward. Lifecycle snapshots keep born and final agents in their active frame,
 emit bootstrap semantics, and mark final pair state for release only after that
 packet is processed; inactive IDs are rejected by exact action coverage. The
+test matrix covers every action in isolation and all 81 ordered two-pair action
+combinations, including non-unit configured resource prices. The
 inherited three-action packet interface remains isolated until the population
 ledger can replace it without changing validated legacy behavior.
 
@@ -271,7 +273,7 @@ Translate simultaneous agent actions into exact VLC activation and shared RF-poo
 - [x] Track per-packet RF use, VLC use, duplication, and activation cost.
 - [x] Ensure VLC-only decisions release their RF reservation.
 - [x] Define deterministic handling for inactive, born, and terminated agents.
-- [ ] Test every action individually and in mixed populations.
+- [x] Test every action individually and in mixed populations.
 - [ ] Test accounting conservation across per-agent and population totals.
 
 ### Deliverables
@@ -659,5 +661,6 @@ hardware-only action masks, and identity-preserving per-packet resource
 accounting with frame totals. VLC-only actions now explicitly release any
 current-frame RF reservation without carrying prior-frame allocations forward,
 and ledger rows now preserve deterministic birth, termination, truncation,
-bootstrap, and post-frame release semantics. Complete the exhaustive
-single-action and mixed-population test matrix next.
+bootstrap, and post-frame release semantics. The exhaustive isolated-action and
+ordered mixed-population matrix now passes. Implement a reusable accounting
+conservation audit and complete the final Phase 3 invariant tests next.

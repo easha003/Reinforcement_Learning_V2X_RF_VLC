@@ -8,7 +8,11 @@ import pytest
 
 from hybrid_v2x_rl.config import load_headline_config
 from hybrid_v2x_rl.config.models import CostConfig
-from hybrid_v2x_rl.core.policy_actions import ActionResourceMap, PolicyAction
+from hybrid_v2x_rl.core.policy_actions import (
+    ActionResourceMap,
+    PolicyAction,
+    action_resources,
+)
 from hybrid_v2x_rl.mean_field.action_ledger import (
     ActionAggregationError,
     FrameActionLedger,
@@ -258,6 +262,117 @@ def test_all_nine_actions_use_the_authoritative_attempt_counts() -> None:
     assert ledger.duplicated_pairs == 4
     assert ledger.total_activation_cost == 25.0
     assert ledger.total_reward == -25.0
+
+
+@pytest.mark.parametrize(
+    "action",
+    tuple(PolicyAction),
+    ids=lambda action: action.label,
+)
+def test_every_action_in_an_isolated_single_pair_frame(action: PolicyAction) -> None:
+    frame = _frame((("pair-a", "veh-1", "veh-2"),))
+    resources = _resource_map(rf_activation=0.3, vlc_activation=2.0)
+    spec = action_resources(action)
+
+    ledger = _ledger(
+        frame,
+        {"pair-a": action},
+        resource_map=resources,
+    )
+    record = ledger.pair_accounting[0]
+    expected_cost = resources.activation_cost(action)
+
+    assert ledger.pair_ids == ("pair-a",)
+    assert record.pair_id == "pair-a"
+    assert record.action is action
+    assert record.action_index == int(action)
+    assert record.action_name == action.label
+    assert record.reserved_rf_attempts == spec.reserved_rf_attempts
+    assert record.vlc_activations == spec.vlc_activations
+    assert record.uses_rf is spec.uses_rf
+    assert record.uses_vlc is spec.uses_vlc
+    assert record.duplicates is spec.duplicates
+    assert record.rf_reservation_released is (not spec.uses_rf)
+    assert record.activation_cost == pytest.approx(expected_cost)
+    assert record.reward == pytest.approx(-expected_cost)
+    assert ledger.total_reserved_rf_attempts == spec.reserved_rf_attempts
+    assert ledger.total_vlc_activations == spec.vlc_activations
+    assert ledger.rf_using_pairs == int(spec.uses_rf)
+    assert ledger.vlc_using_pairs == int(spec.uses_vlc)
+    assert ledger.duplicated_pairs == int(spec.duplicates)
+    assert ledger.total_activation_cost == pytest.approx(expected_cost)
+    assert ledger.total_reward == pytest.approx(-expected_cost)
+    assert ledger.released_rf_pair_ids == (
+        ("pair-a",) if not spec.uses_rf else ()
+    )
+
+
+@pytest.mark.parametrize(
+    "first_action",
+    tuple(PolicyAction),
+    ids=lambda action: f"first={action.label}",
+)
+@pytest.mark.parametrize(
+    "second_action",
+    tuple(PolicyAction),
+    ids=lambda action: f"second={action.label}",
+)
+def test_all_ordered_two_pair_action_combinations(
+    first_action: PolicyAction,
+    second_action: PolicyAction,
+) -> None:
+    frame = _frame(
+        (
+            ("pair-a", "veh-1", "veh-2"),
+            ("pair-b", "veh-3", "veh-4"),
+        )
+    )
+    resources = _resource_map(rf_activation=0.3, vlc_activation=2.0)
+    actions = (first_action, second_action)
+    specs = tuple(action_resources(action) for action in actions)
+
+    ledger = _ledger(
+        frame,
+        {"pair-b": second_action, "pair-a": first_action},
+        resource_map=resources,
+    )
+    records = ledger.pair_accounting
+    expected_costs = tuple(resources.activation_cost(action) for action in actions)
+
+    assert ledger.pair_ids == ("pair-a", "pair-b")
+    assert tuple(record.action for record in records) == actions
+    assert tuple(record.reserved_rf_attempts for record in records) == tuple(
+        spec.reserved_rf_attempts for spec in specs
+    )
+    assert tuple(record.vlc_activations for record in records) == tuple(
+        spec.vlc_activations for spec in specs
+    )
+    assert tuple(record.uses_rf for record in records) == tuple(
+        spec.uses_rf for spec in specs
+    )
+    assert tuple(record.uses_vlc for record in records) == tuple(
+        spec.uses_vlc for spec in specs
+    )
+    assert tuple(record.duplicates for record in records) == tuple(
+        spec.duplicates for spec in specs
+    )
+    assert tuple(record.activation_cost for record in records) == pytest.approx(
+        expected_costs
+    )
+    assert ledger.total_reserved_rf_attempts == sum(
+        spec.reserved_rf_attempts for spec in specs
+    )
+    assert ledger.total_vlc_activations == sum(spec.vlc_activations for spec in specs)
+    assert ledger.rf_using_pairs == sum(spec.uses_rf for spec in specs)
+    assert ledger.vlc_using_pairs == sum(spec.uses_vlc for spec in specs)
+    assert ledger.duplicated_pairs == sum(spec.duplicates for spec in specs)
+    assert ledger.total_activation_cost == pytest.approx(sum(expected_costs))
+    assert ledger.total_reward == pytest.approx(-sum(expected_costs))
+    assert ledger.released_rf_pair_ids == tuple(
+        pair_id
+        for pair_id, spec in zip(("pair-a", "pair-b"), specs, strict=True)
+        if not spec.uses_rf
+    )
 
 
 def test_vlc_only_population_contributes_zero_rf_demand() -> None:
