@@ -8,7 +8,9 @@ flows whose physical endpoints overlap. RF use, VLC use, duplication, cost,
 and reward are all derived from that same authoritative action record. A frame
 is rebuilt only from its current actions: ``VLC`` records an explicit RF
 reservation release, so no RF or DUP reservation can leak in from an earlier
-frame.
+frame. Lifecycle is copied from the population frame onto the same row: born
+and final pairs act normally in that frame, while final rows explicitly direct
+the environment to release pair state only after their packet is processed.
 """
 
 from __future__ import annotations
@@ -26,11 +28,93 @@ from hybrid_v2x_rl.core.policy_actions import (
 )
 
 if TYPE_CHECKING:
-    from hybrid_v2x_rl.mean_field.frames import PopulationFrame
+    from hybrid_v2x_rl.mean_field.frames import PopulationFrame, PopulationPair
 
 
 class ActionAggregationError(HybridV2XError):
     """A joint action cannot be bound exactly to one population frame."""
+
+
+@dataclass(frozen=True, slots=True)
+class PairActionLifecycle:
+    """Lifecycle snapshot aligned with one active pair's current packet."""
+
+    episode_step: int
+    born: bool
+    terminated: bool
+    truncated: bool
+    bootstrap_valid: bool
+    end_reason: str | None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.episode_step, int)
+            or isinstance(self.episode_step, bool)
+            or self.episode_step < 0
+        ):
+            raise ActionAggregationError(
+                "episode_step must be a non-negative integer"
+            )
+        if any(
+            type(flag) is not bool
+            for flag in (
+                self.born,
+                self.terminated,
+                self.truncated,
+                self.bootstrap_valid,
+            )
+        ):
+            raise ActionAggregationError("lifecycle flags must be booleans")
+        if self.born != (self.episode_step == 0):
+            raise ActionAggregationError(
+                "born must be true exactly on episode step zero",
+                context={"episode_step": self.episode_step, "born": self.born},
+            )
+        if self.terminated and self.truncated:
+            raise ActionAggregationError(
+                "a pair action cannot be both terminated and truncated"
+            )
+        if self.end_reason is not None and (
+            not isinstance(self.end_reason, str) or not self.end_reason.strip()
+        ):
+            raise ActionAggregationError(
+                "end_reason must be a non-empty string when provided"
+            )
+        if self.final != (self.end_reason is not None):
+            raise ActionAggregationError(
+                "final lifecycle flags and end_reason must appear together"
+            )
+        if self.bootstrap_valid and not self.truncated:
+            raise ActionAggregationError(
+                "only a truncated final packet may carry a valid bootstrap"
+            )
+
+    @classmethod
+    def from_pair(cls, pair: PopulationPair) -> PairActionLifecycle:
+        """Copy validated replay metadata without retaining mutable frame state."""
+
+        return cls(
+            episode_step=pair.episode_step,
+            born=pair.lifecycle.born,
+            terminated=pair.lifecycle.terminated,
+            truncated=pair.lifecycle.truncated,
+            bootstrap_valid=pair.lifecycle.bootstrap_valid,
+            end_reason=pair.lifecycle.end_reason,
+        )
+
+    @property
+    def continuing(self) -> bool:
+        return not self.born
+
+    @property
+    def final(self) -> bool:
+        return self.terminated or self.truncated
+
+    @property
+    def release_after_frame(self) -> bool:
+        """Final packets act first; their pair state is released afterward."""
+
+        return self.final
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +123,7 @@ class PairActionReservation:
 
     pair_id: str
     action: PolicyAction
+    lifecycle: PairActionLifecycle
 
     def __post_init__(self) -> None:
         if not isinstance(self.pair_id, str) or not self.pair_id.strip():
@@ -47,6 +132,11 @@ class PairActionReservation:
             raise ActionAggregationError(
                 "frame aggregation requires a mask-validated PolicyAction",
                 context={"pair_id": self.pair_id, "action": repr(self.action)},
+            )
+        if not isinstance(self.lifecycle, PairActionLifecycle):
+            raise ActionAggregationError(
+                "pair action must carry a validated lifecycle snapshot",
+                context={"pair_id": self.pair_id},
             )
 
     @property
@@ -84,6 +174,7 @@ class PairActionReservation:
         return PairResourceAccounting(
             pair_id=self.pair_id,
             action=self.action,
+            lifecycle=self.lifecycle,
             reserved_rf_attempts=self.reserved_rf_attempts,
             vlc_activations=self.vlc_activations,
             uses_rf=self.uses_rf,
@@ -101,6 +192,7 @@ class PairResourceAccounting:
 
     pair_id: str
     action: PolicyAction
+    lifecycle: PairActionLifecycle
     reserved_rf_attempts: int
     vlc_activations: int
     uses_rf: bool
@@ -117,6 +209,11 @@ class PairResourceAccounting:
             raise ActionAggregationError(
                 "packet accounting requires a mask-validated PolicyAction",
                 context={"pair_id": self.pair_id, "action": repr(self.action)},
+            )
+        if not isinstance(self.lifecycle, PairActionLifecycle):
+            raise ActionAggregationError(
+                "packet accounting must carry a validated lifecycle snapshot",
+                context={"pair_id": self.pair_id},
             )
         if (
             not isinstance(self.reserved_rf_attempts, int)
@@ -262,8 +359,12 @@ class FrameActionLedger:
             )
 
         reservations = tuple(
-            PairActionReservation(pair_id=pair_id, action=actions[pair_id])
-            for pair_id in expected
+            PairActionReservation(
+                pair_id=pair.pair_id,
+                action=actions[pair.pair_id],
+                lifecycle=PairActionLifecycle.from_pair(pair),
+            )
+            for pair in frame.pairs
         )
         return cls(
             trace_id=frame.trace_id,
@@ -282,6 +383,56 @@ class FrameActionLedger:
     @property
     def active_pairs(self) -> int:
         return len(self.reservations)
+
+    @property
+    def born_pair_ids(self) -> tuple[str, ...]:
+        return tuple(
+            reservation.pair_id
+            for reservation in self.reservations
+            if reservation.lifecycle.born
+        )
+
+    @property
+    def continuing_pair_ids(self) -> tuple[str, ...]:
+        return tuple(
+            reservation.pair_id
+            for reservation in self.reservations
+            if reservation.lifecycle.continuing
+        )
+
+    @property
+    def terminated_pair_ids(self) -> tuple[str, ...]:
+        return tuple(
+            reservation.pair_id
+            for reservation in self.reservations
+            if reservation.lifecycle.terminated
+        )
+
+    @property
+    def truncated_pair_ids(self) -> tuple[str, ...]:
+        return tuple(
+            reservation.pair_id
+            for reservation in self.reservations
+            if reservation.lifecycle.truncated
+        )
+
+    @property
+    def bootstrap_valid_pair_ids(self) -> tuple[str, ...]:
+        return tuple(
+            reservation.pair_id
+            for reservation in self.reservations
+            if reservation.lifecycle.bootstrap_valid
+        )
+
+    @property
+    def release_after_frame_pair_ids(self) -> tuple[str, ...]:
+        """Pairs whose state must be removed after their current packet."""
+
+        return tuple(
+            reservation.pair_id
+            for reservation in self.reservations
+            if reservation.lifecycle.release_after_frame
+        )
 
     @property
     def pair_accounting(self) -> tuple[PairResourceAccounting, ...]:
@@ -369,6 +520,7 @@ class FrameActionLedger:
 __all__ = [
     "ActionAggregationError",
     "FrameActionLedger",
+    "PairActionLifecycle",
     "PairActionReservation",
     "PairResourceAccounting",
 ]

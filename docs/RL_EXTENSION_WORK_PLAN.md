@@ -253,8 +253,11 @@ Each ledger row also derives RF use, VLC use, duplication, activation cost, and
 resource reward from the authoritative mapping and configured cost coefficients.
 VLC-only rows explicitly release the current-frame RF reservation; ledgers are
 rebuilt from current actions so an earlier RF or DUP reservation cannot carry
-forward. The inherited three-action packet interface remains isolated until the
-population ledger can replace it without changing validated legacy behavior.
+forward. Lifecycle snapshots keep born and final agents in their active frame,
+emit bootstrap semantics, and mark final pair state for release only after that
+packet is processed; inactive IDs are rejected by exact action coverage. The
+inherited three-action packet interface remains isolated until the population
+ledger can replace it without changing validated legacy behavior.
 
 ### Objective
 
@@ -267,7 +270,7 @@ Translate simultaneous agent actions into exact VLC activation and shared RF-poo
 - [x] Aggregate RF attempts across all active pairs in the frame.
 - [x] Track per-packet RF use, VLC use, duplication, and activation cost.
 - [x] Ensure VLC-only decisions release their RF reservation.
-- [ ] Define deterministic handling for inactive, born, and terminated agents.
+- [x] Define deterministic handling for inactive, born, and terminated agents.
 - [ ] Test every action individually and in mixed populations.
 - [ ] Test accounting conservation across per-agent and population totals.
 
@@ -654,6 +657,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 Phase 2 is complete. Phase 3 now has the authoritative action mapping,
 hardware-only action masks, and identity-preserving per-packet resource
 accounting with frame totals. VLC-only actions now explicitly release any
-current-frame RF reservation without carrying prior-frame allocations forward.
-Define and test deterministic action-ledger handling for inactive, newly born,
-and final-frame agents next.
+current-frame RF reservation without carrying prior-frame allocations forward,
+and ledger rows now preserve deterministic birth, termination, truncation,
+bootstrap, and post-frame release semantics. Complete the exhaustive
+single-action and mixed-population test matrix next.

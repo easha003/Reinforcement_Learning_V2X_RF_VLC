@@ -12,6 +12,7 @@ from hybrid_v2x_rl.core.policy_actions import ActionResourceMap, PolicyAction
 from hybrid_v2x_rl.mean_field.action_ledger import (
     ActionAggregationError,
     FrameActionLedger,
+    PairActionLifecycle,
     PairActionReservation,
     PairResourceAccounting,
 )
@@ -79,7 +80,11 @@ def _frame(
     *,
     index: int = 2,
     time_s: float = 0.2,
+    lifecycles: dict[str, PairLifecycle] | None = None,
+    episode_steps: dict[str, int] | None = None,
 ) -> PopulationFrame:
+    lifecycle_by_pair = {} if lifecycles is None else lifecycles
+    step_by_pair = {} if episode_steps is None else episode_steps
     vehicle_ids = sorted(
         {endpoint for _, tx_id, rx_id in pair_endpoints for endpoint in (tx_id, rx_id)}
     )
@@ -88,10 +93,13 @@ def _frame(
     pairs = tuple(
         PopulationPair(
             pair_id=pair_id,
-            episode_step=index,
+            episode_step=step_by_pair.get(pair_id, index),
             transmitter=by_id[tx_id],
             receiver=by_id[rx_id],
-            lifecycle=PairLifecycle(born=index == 0),
+            lifecycle=lifecycle_by_pair.get(
+                pair_id,
+                PairLifecycle(born=index == 0),
+            ),
         )
         for pair_id, tx_id, rx_id in sorted(pair_endpoints)
     )
@@ -402,16 +410,138 @@ def test_rf_and_dup_actions_commit_reservations_without_early_release() -> None:
     assert ledger.released_rf_pair_ids == ()
 
 
+def test_lifecycle_rows_include_births_and_final_packets_before_state_release() -> None:
+    endpoints = (
+        ("pair-born", "veh-1", "veh-2"),
+        ("pair-continuing", "veh-3", "veh-4"),
+        ("pair-internal", "veh-5", "veh-6"),
+        ("pair-natural", "veh-7", "veh-8"),
+        ("pair-trace-end", "veh-9", "veh-10"),
+    )
+    frame = _frame(
+        endpoints,
+        index=10,
+        time_s=1.0,
+        lifecycles={
+            "pair-born": PairLifecycle(born=True),
+            "pair-continuing": PairLifecycle(born=False),
+            "pair-internal": PairLifecycle(
+                born=False,
+                truncated=True,
+                bootstrap_valid=True,
+                end_reason="max_duration",
+            ),
+            "pair-natural": PairLifecycle(
+                born=False,
+                terminated=True,
+                end_reason="route_diverged",
+            ),
+            "pair-trace-end": PairLifecycle(
+                born=False,
+                truncated=True,
+                end_reason="trace_end",
+            ),
+        },
+        episode_steps={
+            "pair-born": 0,
+            "pair-continuing": 4,
+            "pair-internal": 10,
+            "pair-natural": 7,
+            "pair-trace-end": 3,
+        },
+    )
+
+    ledger = _ledger(
+        frame,
+        {pair_id: PolicyAction.RF_1 for pair_id in frame.active_pair_ids},
+    )
+
+    assert ledger.active_pairs == 5
+    assert ledger.total_reserved_rf_attempts == 5
+    assert ledger.born_pair_ids == ("pair-born",)
+    assert ledger.continuing_pair_ids == (
+        "pair-continuing",
+        "pair-internal",
+        "pair-natural",
+        "pair-trace-end",
+    )
+    assert ledger.terminated_pair_ids == ("pair-natural",)
+    assert ledger.truncated_pair_ids == ("pair-internal", "pair-trace-end")
+    assert ledger.bootstrap_valid_pair_ids == ("pair-internal",)
+    assert ledger.release_after_frame_pair_ids == (
+        "pair-internal",
+        "pair-natural",
+        "pair-trace-end",
+    )
+    by_id = {record.pair_id: record for record in ledger.pair_accounting}
+    assert by_id["pair-born"].lifecycle.episode_step == 0
+    assert by_id["pair-born"].lifecycle.born
+    assert by_id["pair-natural"].lifecycle.end_reason == "route_diverged"
+    assert by_id["pair-natural"].activation_cost == 1.0
+    assert by_id["pair-internal"].lifecycle.bootstrap_valid
+    assert by_id["pair-trace-end"].lifecycle.release_after_frame
+
+
+def test_terminated_pair_becomes_inactive_after_its_accounted_final_frame() -> None:
+    endpoints = (("pair-a", "veh-1", "veh-2"),)
+    final_frame = _frame(
+        endpoints,
+        index=4,
+        time_s=0.4,
+        lifecycles={
+            "pair-a": PairLifecycle(
+                born=False,
+                terminated=True,
+                end_reason="route_diverged",
+            )
+        },
+        episode_steps={"pair-a": 4},
+    )
+    inactive_frame = _frame((), index=5, time_s=0.5)
+
+    final_ledger = _ledger(final_frame, {"pair-a": PolicyAction.DUP_2})
+    inactive_ledger = _ledger(inactive_frame, {})
+
+    assert final_ledger.pair_ids == ("pair-a",)
+    assert final_ledger.total_reserved_rf_attempts == 2
+    assert final_ledger.release_after_frame_pair_ids == ("pair-a",)
+    assert inactive_ledger.pair_ids == ()
+    assert inactive_ledger.total_reserved_rf_attempts == 0
+    with pytest.raises(ActionAggregationError, match="cover"):
+        _ledger(inactive_frame, {"pair-a": PolicyAction.DUP_2})
+
+
+def test_invalid_action_lifecycle_combinations_fail_closed() -> None:
+    with pytest.raises(ActionAggregationError, match="step zero"):
+        PairActionLifecycle(1, True, False, False, False, None)
+    with pytest.raises(ActionAggregationError, match="both"):
+        PairActionLifecycle(1, False, True, True, False, "trace_end")
+    with pytest.raises(ActionAggregationError, match="appear together"):
+        PairActionLifecycle(1, False, True, False, False, None)
+    with pytest.raises(ActionAggregationError, match="truncated"):
+        PairActionLifecycle(1, False, False, False, True, None)
+
+
 def test_direct_records_reject_invalid_identity_and_unresolved_action() -> None:
+    lifecycle = PairActionLifecycle(1, False, False, False, False, None)
     with pytest.raises(ActionAggregationError, match="pair_id"):
-        PairActionReservation(pair_id="", action=PolicyAction.RF_1)
+        PairActionReservation(
+            pair_id="",
+            action=PolicyAction.RF_1,
+            lifecycle=lifecycle,
+        )
     with pytest.raises(ActionAggregationError, match="mask-validated"):
-        PairActionReservation(pair_id="pair-a", action=1)  # type: ignore[arg-type]
+        PairActionReservation(  # type: ignore[arg-type]
+            pair_id="pair-a",
+            action=1,
+            lifecycle=lifecycle,
+        )
 
 
 def test_direct_ledger_rejects_noncanonical_or_duplicate_pair_rows() -> None:
-    pair_a = PairActionReservation("pair-a", PolicyAction.RF_1)
-    pair_b = PairActionReservation("pair-b", PolicyAction.RF_2)
+    lifecycle = PairActionLifecycle(1, False, False, False, False, None)
+    pair_a = PairActionReservation("pair-a", PolicyAction.RF_1, lifecycle)
+    pair_b = PairActionReservation("pair-b", PolicyAction.RF_2, lifecycle)
     resources = _resource_map()
 
     with pytest.raises(ActionAggregationError, match="canonical"):
@@ -489,9 +619,12 @@ def test_population_totals_conserve_all_per_packet_accounting() -> None:
 
 
 def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> None:
-    valid = PairActionReservation("pair-a", PolicyAction.DUP_2).account(
-        _resource_map()
-    )
+    lifecycle = PairActionLifecycle(1, False, False, False, False, None)
+    valid = PairActionReservation(
+        "pair-a",
+        PolicyAction.DUP_2,
+        lifecycle,
+    ).account(_resource_map())
 
     assert valid.action_index == 6
     assert valid.action_name == "DUP-2"
@@ -506,6 +639,7 @@ def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> No
         PairResourceAccounting(
             pair_id="pair-a",
             action=PolicyAction.DUP_2,
+            lifecycle=lifecycle,
             reserved_rf_attempts=1,
             vlc_activations=1,
             uses_rf=True,
@@ -519,6 +653,7 @@ def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> No
         PairResourceAccounting(
             pair_id="pair-a",
             action=PolicyAction.DUP_2,
+            lifecycle=lifecycle,
             reserved_rf_attempts=2,
             vlc_activations=1,
             uses_rf=True,
@@ -533,6 +668,7 @@ def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> No
         PairResourceAccounting(
             pair_id="pair-a",
             action=PolicyAction.VLC,
+            lifecycle=lifecycle,
             reserved_rf_attempts=0,
             vlc_activations=1,
             uses_rf=False,
