@@ -300,9 +300,13 @@ only a complete, conservation-audited population action ledger and snapshots
 the current frame's canonical per-pair RF reservations. Its unclipped
 ``offered_rf_attempts`` is exactly contract quantity ``D_t``; VLC-only and empty
 populations contribute zero, and each new joint action produces a fresh demand
-without carrying an earlier reservation forward. Mapping this demand to pool
-utilization, measured CBR, and the declared collision sensitivity bands remains
-the next task.
+without carrying an earlier reservation forward. The RF-pool adapter now maps
+``D_t`` through the existing analytical collision model using configured
+per-attempt airtime. It exposes unclipped utilization, clipped CBR, hidden
+contenders, and focal-attempt collision probability for every declared sensing
+band. The adapter removes one focal attempt before evaluating contenders and
+does not reapply the legacy RF-use fraction because offload is already reflected
+in ``D_t``.
 
 ### Objective
 
@@ -311,7 +315,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 ### Tasks
 
 - [x] Recompute offered RF load after all population actions are known.
-- [ ] Map offered load to pool utilization, CBR, and collision probability using the validated RF model.
+- [x] Map offered load to pool utilization, CBR, and collision probability using the validated RF model.
 - [ ] Combine contention risk with policy-independent RF propagation state.
 - [ ] Generate matched/counterfactual randomness where required for fair policy comparison.
 - [ ] Expose only delayed or measured congestion information to the next actor observation.
@@ -670,9 +674,9 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phases 2 and 3 are complete, and Phase 4 has begun with an immutable,
-action-coupled RF-demand boundary that consumes the audited current-frame
-ledger. Implement the next Phase 4 task by mapping its unclipped ``D_t`` to pool
-utilization, clipped CBR, and per-attempt collision probability across the
-configured sensing-reliability bands. Preserve the existing analytical-model
-scope and do not integrate propagation outcomes yet.
+Phases 2 and 3 are complete. Phase 4 now has an immutable action-coupled demand
+boundary and a validated analytical response that maps current ``D_t`` to
+unclipped pool utilization, clipped CBR, and per-attempt collision probability
+across all sensing-reliability bands. Implement the next Phase 4 task by
+combining this contention risk with policy-independent RF propagation and
+decoding state while preserving separate failure-mechanism diagnostics.
