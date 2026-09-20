@@ -22,10 +22,12 @@ from hybrid_v2x_rl.channels.rf.collision import (
     SensitivityBand,
     channel_busy_ratio,
     collision_probability,
+    half_duplex_probability,
     headline_parameters,
     hidden_contenders,
     resource_demand,
 )
+from hybrid_v2x_rl.channels.rf.model import RFPropagationResult
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import MAX_RESERVED_RF_ATTEMPTS
 from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
@@ -327,6 +329,135 @@ class RFPoolResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class RFAttemptRisk:
+    """Action-coupled access risk combined with action-independent physics.
+
+    This is a probability decomposition for one reserved RF attempt, not a
+    sampled outcome. Keeping collision, half-duplex, and decoding separate
+    makes it possible to diagnose whether a policy changed shared-pool load or
+    merely encountered a different physical channel realization.
+    """
+
+    pair_id: str
+    reserved_rf_attempts: int
+    pool_response: RFPoolResponse
+    propagation: RFPropagationResult
+    half_duplex_probability: float
+    access_failure_probability: float
+    total_failure_probability: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pair_id, str) or not self.pair_id.strip():
+            raise RFPoolError("pair_id must be a non-empty string")
+        if not isinstance(self.pool_response, RFPoolResponse):
+            raise RFPoolError("RF attempt risk requires a validated pool response")
+        if not isinstance(self.propagation, RFPropagationResult):
+            raise RFPoolError("RF attempt risk requires a propagation result")
+
+        reservations = dict(
+            self.pool_response.demand.reserved_rf_attempts_by_pair
+        )
+        expected_attempts = reservations.get(self.pair_id)
+        if expected_attempts is None:
+            raise RFPoolError(
+                "pair_id is absent from the RF-pool demand",
+                context={"pair_id": self.pair_id},
+            )
+        if expected_attempts == 0:
+            raise RFPoolError(
+                "a VLC-only pair has no reserved RF attempt to evaluate",
+                context={"pair_id": self.pair_id},
+            )
+        if self.reserved_rf_attempts != expected_attempts:
+            raise RFPoolError(
+                "reserved attempts do not match the RF-pool demand",
+                context={
+                    "pair_id": self.pair_id,
+                    "reserved_rf_attempts": self.reserved_rf_attempts,
+                    "expected": expected_attempts,
+                },
+            )
+
+        for name in (
+            "half_duplex_probability",
+            "access_failure_probability",
+            "total_failure_probability",
+        ):
+            value = getattr(self, name)
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise RFPoolError(
+                    f"{name} must be finite and lie in [0, 1]",
+                    context={name: value},
+                )
+        decoding = self.propagation.decoding_failure_probability
+        if not math.isfinite(decoding) or not 0.0 <= decoding <= 1.0:
+            raise RFPoolError(
+                "decoding failure probability must be finite and lie in [0, 1]",
+                context={"decoding_failure_probability": decoding},
+            )
+
+        collision = self.pool_response.per_attempt_collision_probability
+        expected_access = 1.0 - (1.0 - collision) * (
+            1.0 - self.half_duplex_probability
+        )
+        expected_total = 1.0 - (1.0 - expected_access) * (1.0 - decoding)
+        mismatches = tuple(
+            name
+            for name, actual, expected in (
+                (
+                    "access_failure_probability",
+                    self.access_failure_probability,
+                    expected_access,
+                ),
+                (
+                    "total_failure_probability",
+                    self.total_failure_probability,
+                    expected_total,
+                ),
+            )
+            if not math.isclose(actual, expected, rel_tol=1e-12, abs_tol=1e-15)
+        )
+        if mismatches:
+            raise RFPoolError(
+                "RF attempt risk fields do not reconcile",
+                context={"mismatched_fields": mismatches},
+            )
+
+    @property
+    def collision_probability(self) -> float:
+        """Current action-coupled collision probability for this attempt."""
+
+        return self.pool_response.per_attempt_collision_probability
+
+    @property
+    def decoding_failure_probability(self) -> float:
+        """Policy-independent decoding risk for this attempt."""
+
+        return self.propagation.decoding_failure_probability
+
+    def as_dict(self) -> dict[str, object]:
+        """Return separate access and propagation diagnostics for logging."""
+
+        return {
+            "trace_id": self.pool_response.demand.trace_id,
+            "frame_index": self.pool_response.demand.frame_index,
+            "time_s": self.pool_response.demand.time_s,
+            "pair_id": self.pair_id,
+            "reserved_rf_attempts": self.reserved_rf_attempts,
+            "collision_probability": self.collision_probability,
+            "half_duplex_probability": self.half_duplex_probability,
+            "access_failure_probability": self.access_failure_probability,
+            "propagation_state": self.propagation.propagation_state.value,
+            "pathloss_db": self.propagation.pathloss_db,
+            "shadowing_db": self.propagation.shadowing_db,
+            "fading_gain_linear": self.propagation.fading_gain_linear,
+            "sinr_db": self.propagation.sinr_db,
+            "decoding_failure_probability": self.decoding_failure_probability,
+            "total_failure_probability": self.total_failure_probability,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RFPoolModel:
     """Map action-coupled attempts through the validated analytical model.
 
@@ -417,8 +548,71 @@ class RFPoolModel:
             per_attempt_collision_probability=collision,
         )
 
+    def combine_attempt_risk(
+        self,
+        response: RFPoolResponse,
+        *,
+        pair_id: str,
+        propagation: RFPropagationResult,
+    ) -> RFAttemptRisk:
+        """Combine current contention with one policy-independent RF budget.
+
+        Half-duplex remains the contract's statistical abstraction. Its duty
+        cycle is the population-mean committed RF airtime under the current
+        joint action: ``D_t / N_t`` attempts per active pair. VLC-only pairs
+        therefore lower this term without inventing a fixed RF-use fraction.
+        """
+
+        if not isinstance(response, RFPoolResponse):
+            raise RFPoolError("RF attempt risk requires a validated pool response")
+        if (
+            response.sensitivity_band is not self.sensitivity_band
+            or response.parameters != self.attempt_parameters
+        ):
+            raise RFPoolError(
+                "RF-pool response was not produced by this model",
+                context={"sensitivity_band": response.sensitivity_band.value},
+            )
+        if not isinstance(propagation, RFPropagationResult):
+            raise RFPoolError("RF attempt risk requires a propagation result")
+
+        reservations = dict(response.demand.reserved_rf_attempts_by_pair)
+        reserved_attempts = reservations.get(pair_id)
+        if reserved_attempts is None:
+            raise RFPoolError(
+                "pair_id is absent from the RF-pool demand",
+                context={"pair_id": pair_id},
+            )
+        if reserved_attempts == 0:
+            raise RFPoolError(
+                "a VLC-only pair has no reserved RF attempt to evaluate",
+                context={"pair_id": pair_id},
+            )
+
+        mean_attempts = (
+            response.demand.offered_rf_attempts / response.demand.active_pairs
+        )
+        mean_committed_airtime_s = mean_attempts * response.attempt_airtime_s
+        half_duplex = half_duplex_probability(
+            replace(response.parameters, airtime_s=mean_committed_airtime_s)
+        )
+        collision = response.per_attempt_collision_probability
+        access = 1.0 - (1.0 - collision) * (1.0 - half_duplex)
+        decoding = propagation.decoding_failure_probability
+        total = 1.0 - (1.0 - access) * (1.0 - decoding)
+        return RFAttemptRisk(
+            pair_id=pair_id,
+            reserved_rf_attempts=reserved_attempts,
+            pool_response=response,
+            propagation=propagation,
+            half_duplex_probability=half_duplex,
+            access_failure_probability=access,
+            total_failure_probability=total,
+        )
+
 
 __all__ = [
+    "RFAttemptRisk",
     "RFPoolDemand",
     "RFPoolError",
     "RFPoolModel",

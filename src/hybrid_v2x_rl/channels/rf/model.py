@@ -79,8 +79,8 @@ class RFPacketRandomness:
 
 
 @dataclass(frozen=True, slots=True)
-class RFChannelRequest:
-    """One transmission attempt's inputs.
+class RFPropagationRequest:
+    """Policy-independent physical state for one RF transmission attempt.
 
     ``shadowing_normalized`` and ``fading_power_gain`` come from the correlated
     processes rather than being drawn here, because their whole value is that
@@ -92,9 +92,44 @@ class RFChannelRequest:
     blockage_db: float
     shadowing_normalized: float
     fading_power_gain: float
+
+
+@dataclass(frozen=True, slots=True)
+class RFChannelRequest:
+    """Legacy propagation, contention, and randomness inputs for one attempt."""
+
+    distance_m: float
+    propagation_state: RFPropagationState
+    blockage_db: float
+    shadowing_normalized: float
+    fading_power_gain: float
     neighbour_count: int
     sensed_fraction: float
     randomness: RFPacketRandomness
+
+    @property
+    def propagation(self) -> RFPropagationRequest:
+        """Return the action-independent subset consumed by the physical link."""
+
+        return RFPropagationRequest(
+            distance_m=self.distance_m,
+            propagation_state=self.propagation_state,
+            blockage_db=self.blockage_db,
+            shadowing_normalized=self.shadowing_normalized,
+            fading_power_gain=self.fading_power_gain,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RFPropagationResult:
+    """Deterministic link-budget result with no action or contention inputs."""
+
+    propagation_state: RFPropagationState
+    pathloss_db: float
+    shadowing_db: float
+    fading_gain_linear: float
+    sinr_db: float
+    decoding_failure_probability: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,9 +181,16 @@ class NRV2XChannel:
             return thermal_noise_dbm(self.bandwidth_hz)
         return thermal_noise_dbm(self.bandwidth_hz, self.noise_figure_db)
 
-    def evaluate(self, request: RFChannelRequest) -> RFChannelResult:
-        """Deliver or lose one packet, and say which mechanism decided it."""
+    def evaluate_propagation(
+        self,
+        request: RFPropagationRequest,
+    ) -> RFPropagationResult:
+        """Evaluate only policy-independent propagation and decoding state."""
 
+        if not isinstance(request, RFPropagationRequest):
+            raise RFChannelError(
+                "propagation evaluation requires an RFPropagationRequest"
+            )
         loss = large_scale_loss(
             distance_m=request.distance_m,
             carrier_hz=self.carrier_hz,
@@ -170,6 +212,20 @@ class NRV2XChannel:
         decoding = block_error_probability(
             budget.snr_linear, self.blocklength, self.information_bits
         )
+        return RFPropagationResult(
+            propagation_state=request.propagation_state,
+            pathloss_db=loss.total_db,
+            shadowing_db=shadow_db,
+            fading_gain_linear=request.fading_power_gain,
+            sinr_db=budget.snr_db,
+            decoding_failure_probability=decoding,
+        )
+
+    def evaluate(self, request: RFChannelRequest) -> RFChannelResult:
+        """Deliver or lose one packet, and say which mechanism decided it."""
+
+        propagation = self.evaluate_propagation(request.propagation)
+        decoding = propagation.decoding_failure_probability
         contention = collision_probability(
             request.neighbour_count,
             self.collision,
@@ -193,13 +249,13 @@ class NRV2XChannel:
         access = 1.0 - (1.0 - contention) * (1.0 - half_duplex)
         total = 1.0 - (1.0 - access) * (1.0 - decoding)
         return RFChannelResult(
-            propagation_state=request.propagation_state,
-            pathloss_db=loss.total_db,
-            shadowing_db=shadow_db,
-            fading_gain_linear=request.fading_power_gain,
-            sinr_db=budget.snr_db,
+            propagation_state=propagation.propagation_state,
+            pathloss_db=propagation.pathloss_db,
+            shadowing_db=propagation.shadowing_db,
+            fading_gain_linear=propagation.fading_gain_linear,
+            sinr_db=propagation.sinr_db,
             collision_probability=access,
-            decoding_failure_probability=decoding,
+            decoding_failure_probability=propagation.decoding_failure_probability,
             total_failure_probability=total,
             success=success,
             failure_cause=cause,
@@ -244,5 +300,7 @@ __all__ = [
     "RFChannelRequest",
     "RFChannelResult",
     "RFPacketRandomness",
+    "RFPropagationRequest",
+    "RFPropagationResult",
     "marginal_and_joint",
 ]

@@ -8,6 +8,8 @@ measurement rather than a sample.
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 import numpy as np
 import pytest
 
@@ -17,6 +19,7 @@ from hybrid_v2x_rl.channels.rf.model import (
     RFChannelError,
     RFChannelRequest,
     RFPacketRandomness,
+    RFPropagationRequest,
     marginal_and_joint,
 )
 from hybrid_v2x_rl.core.enums import FailureCause, RFPropagationState
@@ -56,6 +59,23 @@ def request(
         neighbour_count=neighbours,
         sensed_fraction=sensed,
         randomness=RFPacketRandomness(*draws),
+    )
+
+
+def propagation_request(
+    *,
+    distance_m: float = 50.0,
+    state: RFPropagationState = RFPropagationState.LOS,
+    blockage_db: float = 0.0,
+    shadowing: float = 0.0,
+    fading: float = 1.0,
+) -> RFPropagationRequest:
+    return RFPropagationRequest(
+        distance_m=distance_m,
+        propagation_state=state,
+        blockage_db=blockage_db,
+        shadowing_normalized=shadowing,
+        fading_power_gain=fading,
     )
 
 
@@ -102,6 +122,54 @@ def test_failure_probability_does_not_depend_on_the_draws() -> None:
 
 
 # -- composition --------------------------------------------------------------
+
+
+def test_propagation_boundary_contains_no_policy_or_contention_inputs() -> None:
+    assert tuple(field.name for field in fields(RFPropagationRequest)) == (
+        "distance_m",
+        "propagation_state",
+        "blockage_db",
+        "shadowing_normalized",
+        "fading_power_gain",
+    )
+
+
+def test_propagation_evaluation_preserves_the_legacy_physical_budget() -> None:
+    model = channel()
+    legacy = model.evaluate(
+        request(
+            distance_m=100.0,
+            state=RFPropagationState.NLOSV,
+            blockage_db=9.0,
+            shadowing=0.5,
+            fading=0.25,
+        )
+    )
+    propagation = model.evaluate_propagation(
+        propagation_request(
+            distance_m=100.0,
+            state=RFPropagationState.NLOSV,
+            blockage_db=9.0,
+            shadowing=0.5,
+            fading=0.25,
+        )
+    )
+
+    assert propagation.propagation_state is legacy.propagation_state
+    assert propagation.pathloss_db == pytest.approx(legacy.pathloss_db)
+    assert propagation.shadowing_db == pytest.approx(legacy.shadowing_db)
+    assert propagation.fading_gain_linear == pytest.approx(
+        legacy.fading_gain_linear
+    )
+    assert propagation.sinr_db == pytest.approx(legacy.sinr_db)
+    assert propagation.decoding_failure_probability == pytest.approx(
+        legacy.decoding_failure_probability
+    )
+
+
+def test_propagation_evaluation_refuses_the_legacy_coupled_request() -> None:
+    with pytest.raises(RFChannelError, match="RFPropagationRequest"):
+        channel().evaluate_propagation(request())  # type: ignore[arg-type]
 
 
 def test_the_two_mechanisms_stay_separable_in_the_result() -> None:

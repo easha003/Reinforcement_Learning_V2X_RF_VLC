@@ -306,7 +306,12 @@ per-attempt airtime. It exposes unclipped utilization, clipped CBR, hidden
 contenders, and focal-attempt collision probability for every declared sensing
 band. The adapter removes one focal attempt before evaluating contenders and
 does not reapply the legacy RF-use fraction because offload is already reflected
-in ``D_t``.
+in ``D_t``. RF propagation now has an explicit deterministic boundary containing
+only geometry, blockage, shadowing, and fading inputs. The per-attempt risk
+composition adds the current pool collision probability and population-mean
+half-duplex exposure afterward, while retaining collision, half-duplex,
+decoding, access, and total failure probabilities as separate diagnostics. It
+does not sample an outcome or consume a random tape.
 
 ### Objective
 
@@ -316,7 +321,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 
 - [x] Recompute offered RF load after all population actions are known.
 - [x] Map offered load to pool utilization, CBR, and collision probability using the validated RF model.
-- [ ] Combine contention risk with policy-independent RF propagation state.
+- [x] Combine contention risk with policy-independent RF propagation state.
 - [ ] Generate matched/counterfactual randomness where required for fair policy comparison.
 - [ ] Expose only delayed or measured congestion information to the next actor observation.
 - [ ] Test empty, light-load, saturation, and overload conditions.
@@ -674,9 +679,11 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phases 2 and 3 are complete. Phase 4 now has an immutable action-coupled demand
-boundary and a validated analytical response that maps current ``D_t`` to
-unclipped pool utilization, clipped CBR, and per-attempt collision probability
-across all sensing-reliability bands. Implement the next Phase 4 task by
-combining this contention risk with policy-independent RF propagation and
-decoding state while preserving separate failure-mechanism diagnostics.
+Phases 2 and 3 are complete. Phase 4 now maps complete current-frame joint
+actions to RF-pool load and combines the resulting per-attempt contention risk
+with a deterministic, policy-independent propagation/decoding result. The
+combined risk preserves separate mechanism diagnostics and deliberately has no
+sampled success or failure. Implement the next Phase 4 task by generating
+identity-stable matched/counterfactual randomness, preserving the four-attempt
+prefix rule across RF-n and DUP-n actions without making draws depend on
+population iteration order.

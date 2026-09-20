@@ -8,7 +8,12 @@ from pathlib import Path
 import pytest
 
 from hybrid_v2x_rl.channels.rf.collision import MODEL_NAME, SensitivityBand
+from hybrid_v2x_rl.channels.rf.model import (
+    RFPropagationRequest,
+    RFPropagationResult,
+)
 from hybrid_v2x_rl.config import load_headline_config
+from hybrid_v2x_rl.core.enums import RFPropagationState
 from hybrid_v2x_rl.core.policy_actions import (
     ACTION_CONTRACT_VERSION,
     ActionResourceMap,
@@ -21,6 +26,7 @@ from hybrid_v2x_rl.mean_field.action_ledger import (
     PairActionReservation,
 )
 from hybrid_v2x_rl.mean_field.rf_pool import (
+    RFAttemptRisk,
     RFPoolDemand,
     RFPoolError,
     RFPoolModel,
@@ -64,6 +70,24 @@ def _demand_with_total_attempts(offered_rf_attempts: int) -> RFPoolDemand:
         reserved_rf_attempts_by_pair=reservations,
         offered_rf_attempts=offered_rf_attempts,
         rf_using_pairs=len(reservations),
+    )
+
+
+def _propagation(
+    *,
+    state: RFPropagationState = RFPropagationState.LOS,
+    fading_power_gain: float = 1.0,
+) -> RFPropagationResult:
+    config = load_headline_config(PROJECT_ROOT)
+    channel = build_rf_channel(config)
+    return channel.evaluate_propagation(
+        RFPropagationRequest(
+            distance_m=100.0,
+            propagation_state=state,
+            blockage_db=0.0,
+            shadowing_normalized=0.0,
+            fading_power_gain=fading_power_gain,
+        )
     )
 
 
@@ -297,3 +321,134 @@ def test_response_and_model_fail_closed_on_inconsistent_fields() -> None:
             sensitivity_band=SensitivityBand.OPTIMISTIC,
             attempt_airtime_s=model.attempt_airtime_s,
         )
+
+
+def test_attempt_risk_combines_current_contention_with_fixed_propagation() -> None:
+    model = _model()
+    propagation = _propagation()
+    low = model.combine_attempt_risk(
+        model.evaluate(_demand_with_total_attempts(4)),
+        pair_id="pair-000",
+        propagation=propagation,
+    )
+    high = model.combine_attempt_risk(
+        model.evaluate(_demand_with_total_attempts(80)),
+        pair_id="pair-000",
+        propagation=propagation,
+    )
+
+    assert low.propagation is propagation
+    assert high.propagation is propagation
+    assert low.decoding_failure_probability == pytest.approx(
+        high.decoding_failure_probability
+    )
+    assert low.half_duplex_probability == pytest.approx(
+        high.half_duplex_probability
+    )
+    assert low.collision_probability < high.collision_probability
+    assert low.access_failure_probability < high.access_failure_probability
+    assert low.total_failure_probability < high.total_failure_probability
+
+
+def test_attempt_risk_changes_decoding_without_changing_contention() -> None:
+    model = _model()
+    response = model.evaluate(_demand_with_total_attempts(20))
+    clear = model.combine_attempt_risk(
+        response,
+        pair_id="pair-000",
+        propagation=_propagation(),
+    )
+    faded = model.combine_attempt_risk(
+        response,
+        pair_id="pair-000",
+        propagation=_propagation(
+            state=RFPropagationState.NLOS,
+            fading_power_gain=1e-4,
+        ),
+    )
+
+    assert clear.collision_probability == pytest.approx(
+        faded.collision_probability
+    )
+    assert clear.half_duplex_probability == pytest.approx(
+        faded.half_duplex_probability
+    )
+    assert clear.decoding_failure_probability < faded.decoding_failure_probability
+    assert clear.total_failure_probability < faded.total_failure_probability
+
+
+def test_attempt_risk_preserves_each_failure_mechanism_and_exact_composition() -> None:
+    model = _model()
+    response = model.evaluate(
+        _demand_with_total_attempts(20),
+        sensed_fraction=0.75,
+    )
+    risk = model.combine_attempt_risk(
+        response,
+        pair_id="pair-000",
+        propagation=_propagation(fading_power_gain=1e-4),
+    )
+
+    expected_half_duplex = (20 / 5) * 0.0005 / 0.1
+    expected_access = 1.0 - (1.0 - risk.collision_probability) * (
+        1.0 - expected_half_duplex
+    )
+    expected_total = 1.0 - (1.0 - expected_access) * (
+        1.0 - risk.decoding_failure_probability
+    )
+    diagnostics = risk.as_dict()
+
+    assert risk.reserved_rf_attempts == 4
+    assert risk.half_duplex_probability == pytest.approx(expected_half_duplex)
+    assert risk.access_failure_probability == pytest.approx(expected_access)
+    assert risk.total_failure_probability == pytest.approx(expected_total)
+    assert diagnostics["collision_probability"] == pytest.approx(
+        risk.collision_probability
+    )
+    assert diagnostics["decoding_failure_probability"] == pytest.approx(
+        risk.decoding_failure_probability
+    )
+    assert diagnostics["total_failure_probability"] == pytest.approx(
+        risk.total_failure_probability
+    )
+    assert "success" not in diagnostics
+    assert "failure_cause" not in diagnostics
+
+
+def test_attempt_risk_rejects_absent_and_vlc_only_pairs() -> None:
+    model = _model()
+    response = model.evaluate(
+        RFPoolDemand.from_ledger(
+            _ledger((PolicyAction.VLC, PolicyAction.RF_1))
+        )
+    )
+    propagation = _propagation()
+
+    with pytest.raises(RFPoolError, match="VLC-only"):
+        model.combine_attempt_risk(
+            response,
+            pair_id="pair-0",
+            propagation=propagation,
+        )
+    with pytest.raises(RFPoolError, match="absent"):
+        model.combine_attempt_risk(
+            response,
+            pair_id="not-active",
+            propagation=propagation,
+        )
+
+
+def test_attempt_risk_fails_closed_if_composed_fields_drift() -> None:
+    model = _model()
+    risk = model.combine_attempt_risk(
+        model.evaluate(_demand_with_total_attempts(4)),
+        pair_id="pair-000",
+        propagation=_propagation(),
+    )
+
+    with pytest.raises(RFPoolError, match="do not reconcile"):
+        replace(risk, access_failure_probability=0.9)
+    with pytest.raises(RFPoolError, match="reserved attempts"):
+        replace(risk, reserved_rf_attempts=3)
+
+    assert isinstance(risk, RFAttemptRisk)
