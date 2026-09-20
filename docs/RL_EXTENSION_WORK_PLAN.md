@@ -240,13 +240,20 @@ Repeated replay produces identical frames; all counts reconcile with the source 
 
 ## Phase 3 — Population action model
 
+Status (2026-09-19): **in progress**. The authoritative contract-`1.0.0`
+nine-action indices and resource mapping are implemented in
+`hybrid_v2x_rl.core.policy_actions`. Configuration order, RF-attempt counts,
+VLC activations, costs, and rewards now derive from that single table. The
+inherited three-action packet interface remains isolated until the population
+ledger can replace it without changing validated legacy behavior.
+
 ### Objective
 
 Translate simultaneous agent actions into exact VLC activation and shared RF-pool demand.
 
 ### Tasks
 
-- [ ] Implement a single authoritative action-to-resource mapping.
+- [x] Implement a single authoritative action-to-resource mapping.
 - [ ] Apply action masks when a medium or reservation choice is physically unavailable.
 - [ ] Aggregate RF attempts across all active pairs in the frame.
 - [ ] Track per-packet RF use, VLC use, duplication, and activation cost.
@@ -635,8 +642,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phase 2 is complete: the chronological population-frame reader, lifecycle
-structures, immutable split catalog, deterministic fixtures, compact cache
-format `1.0.0`, and 21-trace source-to-cache validation are implemented and
-verified. Begin Phase 3 with the single authoritative nine-action-to-resource
-mapping, then build the population action ledger on that mapping.
+Phase 2 is complete. Phase 3 has started with the authoritative nine-action
+resource mapping. Implement and test the action-mask rules next, using the
+mapping as the sole source of RF-attempt and VLC-activation semantics before
+building mixed-population aggregation.

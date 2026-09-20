@@ -11,8 +11,9 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-from hybrid_v2x_rl.config.models import POLICY_ACTION_ORDER, PhyTimingConfig, ProjectConfig
+from hybrid_v2x_rl.config.models import PhyTimingConfig, ProjectConfig
 from hybrid_v2x_rl.core.errors import ConfigurationError
+from hybrid_v2x_rl.core.policy_actions import POLICY_ACTION_ORDER
 
 FORBIDDEN_OBSERVATION_FIELDS = frozenset(
     {

@@ -14,6 +14,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from hybrid_v2x_rl.core.policy_actions import POLICY_ACTION_ORDER, PolicyActionName
+
 PositiveFloat = Annotated[float, Field(gt=0.0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -371,31 +373,6 @@ class TraceSplitConfig(ConfigModel):
             if len(set(trace_ids)) != len(trace_ids):
                 raise ValueError(f"duplicate trace ID in {split_name} split")
         return self
-
-
-PolicyActionName = Literal[
-    "VLC",
-    "RF-1",
-    "RF-2",
-    "RF-3",
-    "RF-4",
-    "DUP-1",
-    "DUP-2",
-    "DUP-3",
-    "DUP-4",
-]
-
-POLICY_ACTION_ORDER: tuple[PolicyActionName, ...] = (
-    "VLC",
-    "RF-1",
-    "RF-2",
-    "RF-3",
-    "RF-4",
-    "DUP-1",
-    "DUP-2",
-    "DUP-3",
-    "DUP-4",
-)
 
 
 class MeanFieldConfig(ConfigModel):
