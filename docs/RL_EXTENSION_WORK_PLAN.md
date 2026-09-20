@@ -249,6 +249,8 @@ hardware/profile-only mask and missing-observation fallback are implemented in
 cannot enter that API. `hybrid_v2x_rl.mean_field.action_ledger` now binds one
 validated action to every active pair in canonical frame order and computes
 exact committed RF demand without merging flows that share a physical endpoint.
+Each ledger row also derives RF use, VLC use, duplication, activation cost, and
+resource reward from the authoritative mapping and configured cost coefficients.
 The inherited three-action packet interface remains isolated until the
 population ledger can replace it without changing validated legacy behavior.
 
@@ -261,7 +263,7 @@ Translate simultaneous agent actions into exact VLC activation and shared RF-poo
 - [x] Implement a single authoritative action-to-resource mapping.
 - [x] Apply action masks when a medium or reservation choice is physically unavailable.
 - [x] Aggregate RF attempts across all active pairs in the frame.
-- [ ] Track per-packet RF use, VLC use, duplication, and activation cost.
+- [x] Track per-packet RF use, VLC use, duplication, and activation cost.
 - [ ] Ensure VLC-only decisions release their RF reservation.
 - [ ] Define deterministic handling for inactive, born, and terminated agents.
 - [ ] Test every action individually and in mixed populations.
@@ -648,6 +650,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 ## Immediate next step
 
 Phase 2 is complete. Phase 3 now has the authoritative action mapping,
-hardware-only action masks, and identity-preserving frame RF-demand aggregation.
-Extend the ledger with per-packet RF use, VLC use, duplication, and configured
-activation cost next, while retaining exact per-agent-to-population accounting.
+hardware-only action masks, and identity-preserving per-packet resource
+accounting with frame totals. Implement and test the explicit VLC-only RF
+reservation-release boundary next, without changing the committed-reservation
+semantics of RF and DUP actions.
