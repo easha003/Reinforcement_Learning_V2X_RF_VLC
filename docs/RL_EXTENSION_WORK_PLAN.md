@@ -246,9 +246,11 @@ nine-action indices and resource mapping are implemented in
 VLC activations, costs, and rewards now derive from that single table. The
 hardware/profile-only mask and missing-observation fallback are implemented in
 `hybrid_v2x_rl.mean_field.action_masks`; transient channel truth and predictions
-cannot enter that API. The inherited three-action packet interface remains
-isolated until the population ledger can replace it without changing validated
-legacy behavior.
+cannot enter that API. `hybrid_v2x_rl.mean_field.action_ledger` now binds one
+validated action to every active pair in canonical frame order and computes
+exact committed RF demand without merging flows that share a physical endpoint.
+The inherited three-action packet interface remains isolated until the
+population ledger can replace it without changing validated legacy behavior.
 
 ### Objective
 
@@ -258,7 +260,7 @@ Translate simultaneous agent actions into exact VLC activation and shared RF-poo
 
 - [x] Implement a single authoritative action-to-resource mapping.
 - [x] Apply action masks when a medium or reservation choice is physically unavailable.
-- [ ] Aggregate RF attempts across all active pairs in the frame.
+- [x] Aggregate RF attempts across all active pairs in the frame.
 - [ ] Track per-packet RF use, VLC use, duplication, and activation cost.
 - [ ] Ensure VLC-only decisions release their RF reservation.
 - [ ] Define deterministic handling for inactive, born, and terminated agents.
@@ -645,7 +647,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phase 2 is complete. Phase 3 now has the authoritative action mapping and
-hardware-only action masks. Implement frame-level RF-attempt aggregation next,
-using validated unmasked actions and preserving per-pair identities so the
-later population ledger can prove accounting conservation.
+Phase 2 is complete. Phase 3 now has the authoritative action mapping,
+hardware-only action masks, and identity-preserving frame RF-demand aggregation.
+Extend the ledger with per-packet RF use, VLC use, duplication, and configured
+activation cost next, while retaining exact per-agent-to-population accounting.
