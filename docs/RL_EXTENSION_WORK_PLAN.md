@@ -244,8 +244,11 @@ Status (2026-09-19): **in progress**. The authoritative contract-`1.0.0`
 nine-action indices and resource mapping are implemented in
 `hybrid_v2x_rl.core.policy_actions`. Configuration order, RF-attempt counts,
 VLC activations, costs, and rewards now derive from that single table. The
-inherited three-action packet interface remains isolated until the population
-ledger can replace it without changing validated legacy behavior.
+hardware/profile-only mask and missing-observation fallback are implemented in
+`hybrid_v2x_rl.mean_field.action_masks`; transient channel truth and predictions
+cannot enter that API. The inherited three-action packet interface remains
+isolated until the population ledger can replace it without changing validated
+legacy behavior.
 
 ### Objective
 
@@ -254,7 +257,7 @@ Translate simultaneous agent actions into exact VLC activation and shared RF-poo
 ### Tasks
 
 - [x] Implement a single authoritative action-to-resource mapping.
-- [ ] Apply action masks when a medium or reservation choice is physically unavailable.
+- [x] Apply action masks when a medium or reservation choice is physically unavailable.
 - [ ] Aggregate RF attempts across all active pairs in the frame.
 - [ ] Track per-packet RF use, VLC use, duplication, and activation cost.
 - [ ] Ensure VLC-only decisions release their RF reservation.
@@ -642,7 +645,7 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phase 2 is complete. Phase 3 has started with the authoritative nine-action
-resource mapping. Implement and test the action-mask rules next, using the
-mapping as the sole source of RF-attempt and VLC-activation semantics before
-building mixed-population aggregation.
+Phase 2 is complete. Phase 3 now has the authoritative action mapping and
+hardware-only action masks. Implement frame-level RF-attempt aggregation next,
+using validated unmasked actions and preserving per-pair identities so the
+later population ledger can prove accounting conservation.
