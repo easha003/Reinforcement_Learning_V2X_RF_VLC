@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,11 +15,13 @@ from hybrid_v2x_rl.core.policy_actions import (
     action_resources,
 )
 from hybrid_v2x_rl.mean_field.action_ledger import (
+    AccountingConservationAudit,
     ActionAggregationError,
     FrameActionLedger,
     PairActionLifecycle,
     PairActionReservation,
     PairResourceAccounting,
+    ResourceAccountingTotals,
 )
 from hybrid_v2x_rl.mean_field.frames import (
     FrameTraceSource,
@@ -262,6 +265,10 @@ def test_all_nine_actions_use_the_authoritative_attempt_counts() -> None:
     assert ledger.duplicated_pairs == 4
     assert ledger.total_activation_cost == 25.0
     assert ledger.total_reward == -25.0
+    audit = ledger.audit_accounting_conservation()
+    assert audit.passed
+    assert audit.mismatched_fields == ()
+    assert audit.per_agent_totals == audit.population_totals
 
 
 @pytest.mark.parametrize(
@@ -373,6 +380,9 @@ def test_all_ordered_two_pair_action_combinations(
         for pair_id, spec in zip(("pair-a", "pair-b"), specs, strict=True)
         if not spec.uses_rf
     )
+    audit = ledger.audit_accounting_conservation()
+    assert audit.passed
+    assert audit.per_agent_totals == audit.population_totals
 
 
 def test_vlc_only_population_contributes_zero_rf_demand() -> None:
@@ -438,6 +448,19 @@ def test_empty_population_has_valid_zero_demand() -> None:
     assert ledger.rewards_by_pair == ()
     assert ledger.total_activation_cost == 0.0
     assert ledger.total_reward == 0.0
+    audit = ledger.audit_accounting_conservation()
+    assert audit.passed
+    assert audit.per_agent_totals == ResourceAccountingTotals(
+        active_pairs=0,
+        reserved_rf_attempts=0,
+        vlc_activations=0,
+        rf_using_pairs=0,
+        vlc_using_pairs=0,
+        duplicated_pairs=0,
+        rf_reservation_releases=0,
+        activation_cost=0.0,
+        reward=0.0,
+    )
 
 
 @pytest.mark.parametrize(
@@ -700,7 +723,7 @@ def test_nonunit_configured_prices_flow_into_every_packet_and_frame_total() -> N
     assert ledger.total_reward == pytest.approx(-6.4)
 
 
-def test_population_totals_conserve_all_per_packet_accounting() -> None:
+def test_population_totals_conserve_all_per_agent_accounting_exactly() -> None:
     frame = _frame(
         (
             ("pair-a", "veh-1", "veh-2"),
@@ -716,21 +739,66 @@ def test_population_totals_conserve_all_per_packet_accounting() -> None:
             "pair-c": PolicyAction.DUP_2,
         },
     )
-    records = ledger.pair_accounting
+    audit = ledger.audit_accounting_conservation()
 
-    assert ledger.total_reserved_rf_attempts == sum(
-        record.reserved_rf_attempts for record in records
+    assert audit.trace_id == TRACE_ID
+    assert audit.frame_index == frame.index
+    assert audit.passed
+    assert audit.mismatched_fields == ()
+    assert audit.per_agent_totals == audit.population_totals
+    assert audit.population_totals == ResourceAccountingTotals(
+        active_pairs=3,
+        reserved_rf_attempts=5,
+        vlc_activations=2,
+        rf_using_pairs=2,
+        vlc_using_pairs=2,
+        duplicated_pairs=1,
+        rf_reservation_releases=1,
+        activation_cost=7.0,
+        reward=-7.0,
     )
-    assert ledger.total_vlc_activations == sum(
-        record.vlc_activations for record in records
+    assert audit.population_totals.as_dict() == {
+        "active_pairs": 3,
+        "reserved_rf_attempts": 5,
+        "vlc_activations": 2,
+        "rf_using_pairs": 2,
+        "vlc_using_pairs": 2,
+        "duplicated_pairs": 1,
+        "rf_reservation_releases": 1,
+        "activation_cost": 7.0,
+        "reward": -7.0,
+    }
+
+
+def test_conservation_audit_fails_closed_with_field_level_diagnostics() -> None:
+    frame = _frame((("pair-a", "veh-1", "veh-2"),))
+    ledger = _ledger(frame, {"pair-a": PolicyAction.DUP_2})
+    valid = ledger.audit_accounting_conservation()
+    drifted_population = replace(
+        valid.population_totals,
+        reserved_rf_attempts=valid.population_totals.reserved_rf_attempts + 1,
+        activation_cost=valid.population_totals.activation_cost + 0.5,
     )
-    assert ledger.rf_using_pairs == sum(record.uses_rf for record in records)
-    assert ledger.vlc_using_pairs == sum(record.uses_vlc for record in records)
-    assert ledger.duplicated_pairs == sum(record.duplicates for record in records)
-    assert ledger.total_activation_cost == sum(
-        record.activation_cost for record in records
+    drifted = AccountingConservationAudit(
+        trace_id=valid.trace_id,
+        frame_index=valid.frame_index,
+        per_agent_totals=valid.per_agent_totals,
+        population_totals=drifted_population,
     )
-    assert ledger.total_reward == sum(record.reward for record in records)
+
+    assert not drifted.passed
+    assert drifted.mismatched_fields == (
+        "reserved_rf_attempts",
+        "activation_cost",
+    )
+    with pytest.raises(ActionAggregationError, match="does not conserve") as captured:
+        drifted.require_conserved()
+    assert captured.value.context["trace_id"] == TRACE_ID
+    assert captured.value.context["frame_index"] == frame.index
+    assert captured.value.context["mismatched_fields"] == (
+        "reserved_rf_attempts",
+        "activation_cost",
+    )
 
 
 def test_materialized_packet_accounting_rejects_resource_or_reward_drift() -> None:

@@ -240,7 +240,7 @@ Repeated replay produces identical frames; all counts reconcile with the source 
 
 ## Phase 3 — Population action model
 
-Status (2026-09-19): **in progress**. The authoritative contract-`1.0.0`
+Status (2026-09-20): **complete**. The authoritative contract-`1.0.0`
 nine-action indices and resource mapping are implemented in
 `hybrid_v2x_rl.core.policy_actions`. Configuration order, RF-attempt counts,
 VLC activations, costs, and rewards now derive from that single table. The
@@ -258,6 +258,11 @@ emit bootstrap semantics, and mark final pair state for release only after that
 packet is processed; inactive IDs are rejected by exact action coverage. The
 test matrix covers every action in isolation and all 81 ordered two-pair action
 combinations, including non-unit configured resource prices. The
+reusable conservation audit now reconciles active-pair count, RF attempts, VLC
+activations, RF/VLC/duplication counts, RF releases, activation cost, and reward
+exactly between immutable per-agent rows and published population totals. It
+passes for all actions, mixed and empty populations, and fails closed with
+field-level diagnostics if an aggregate drifts. The
 inherited three-action packet interface remains isolated until the population
 ledger can replace it without changing validated legacy behavior.
 
@@ -274,7 +279,7 @@ Translate simultaneous agent actions into exact VLC activation and shared RF-poo
 - [x] Ensure VLC-only decisions release their RF reservation.
 - [x] Define deterministic handling for inactive, born, and terminated agents.
 - [x] Test every action individually and in mixed populations.
-- [ ] Test accounting conservation across per-agent and population totals.
+- [x] Test accounting conservation across per-agent and population totals.
 
 ### Deliverables
 
@@ -656,11 +661,9 @@ These are future extensions, not prerequisites for demonstrating the first popul
 
 ## Immediate next step
 
-Phase 2 is complete. Phase 3 now has the authoritative action mapping,
-hardware-only action masks, and identity-preserving per-packet resource
-accounting with frame totals. VLC-only actions now explicitly release any
-current-frame RF reservation without carrying prior-frame allocations forward,
-and ledger rows now preserve deterministic birth, termination, truncation,
-bootstrap, and post-frame release semantics. The exhaustive isolated-action and
-ordered mixed-population matrix now passes. Implement a reusable accounting
-conservation audit and complete the final Phase 3 invariant tests next.
+Phases 2 and 3 are complete. The Phase 3 ledger now provides authoritative
+nine-action mapping, hardware-only masks, deterministic lifecycle handling,
+exact per-agent resource rows, population totals, and a fail-closed conservation
+audit. Begin Phase 4 by defining the action-coupled RF-pool boundary that consumes
+the ledger's current-frame offered demand ``D_t``; then test empty, light-load,
+saturation, and overload behavior before integrating propagation outcomes.

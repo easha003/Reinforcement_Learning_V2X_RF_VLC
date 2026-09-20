@@ -278,6 +278,151 @@ class PairResourceAccounting:
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceAccountingTotals:
+    """Comparable per-agent or population resource-accounting totals."""
+
+    active_pairs: int
+    reserved_rf_attempts: int
+    vlc_activations: int
+    rf_using_pairs: int
+    vlc_using_pairs: int
+    duplicated_pairs: int
+    rf_reservation_releases: int
+    activation_cost: float
+    reward: float
+
+    def __post_init__(self) -> None:
+        counts = {
+            "active_pairs": self.active_pairs,
+            "reserved_rf_attempts": self.reserved_rf_attempts,
+            "vlc_activations": self.vlc_activations,
+            "rf_using_pairs": self.rf_using_pairs,
+            "vlc_using_pairs": self.vlc_using_pairs,
+            "duplicated_pairs": self.duplicated_pairs,
+            "rf_reservation_releases": self.rf_reservation_releases,
+        }
+        invalid_counts = tuple(
+            name
+            for name, value in counts.items()
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0
+        )
+        if invalid_counts:
+            raise ActionAggregationError(
+                "accounting totals require non-negative integer counts",
+                context={"invalid_fields": invalid_counts},
+            )
+        if not math.isfinite(self.activation_cost) or self.activation_cost < 0.0:
+            raise ActionAggregationError(
+                "total activation cost must be finite and non-negative"
+            )
+        if not math.isfinite(self.reward) or self.reward > 0.0:
+            raise ActionAggregationError("total reward must be finite and non-positive")
+
+    @classmethod
+    def from_records(
+        cls,
+        records: tuple[PairResourceAccounting, ...],
+    ) -> ResourceAccountingTotals:
+        """Sum immutable per-agent rows without rounding intermediate values."""
+
+        if any(not isinstance(record, PairResourceAccounting) for record in records):
+            raise ActionAggregationError(
+                "accounting totals require PairResourceAccounting rows"
+            )
+        return cls(
+            active_pairs=len(records),
+            reserved_rf_attempts=sum(
+                record.reserved_rf_attempts for record in records
+            ),
+            vlc_activations=sum(record.vlc_activations for record in records),
+            rf_using_pairs=sum(record.uses_rf for record in records),
+            vlc_using_pairs=sum(record.uses_vlc for record in records),
+            duplicated_pairs=sum(record.duplicates for record in records),
+            rf_reservation_releases=sum(
+                record.rf_reservation_released for record in records
+            ),
+            activation_cost=math.fsum(record.activation_cost for record in records),
+            reward=math.fsum(record.reward for record in records),
+        )
+
+    def as_dict(self) -> dict[str, int | float]:
+        """Return stable machine-readable fields for diagnostics and artifacts."""
+
+        return {
+            "active_pairs": self.active_pairs,
+            "reserved_rf_attempts": self.reserved_rf_attempts,
+            "vlc_activations": self.vlc_activations,
+            "rf_using_pairs": self.rf_using_pairs,
+            "vlc_using_pairs": self.vlc_using_pairs,
+            "duplicated_pairs": self.duplicated_pairs,
+            "rf_reservation_releases": self.rf_reservation_releases,
+            "activation_cost": self.activation_cost,
+            "reward": self.reward,
+        }
+
+
+_ACCOUNTING_TOTAL_FIELDS = tuple(ResourceAccountingTotals.__dataclass_fields__)
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingConservationAudit:
+    """Exact reconciliation of summed agent rows and published frame totals."""
+
+    trace_id: str
+    frame_index: int
+    per_agent_totals: ResourceAccountingTotals
+    population_totals: ResourceAccountingTotals
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trace_id, str) or not self.trace_id.strip():
+            raise ActionAggregationError("trace_id must be a non-empty string")
+        if (
+            not isinstance(self.frame_index, int)
+            or isinstance(self.frame_index, bool)
+            or self.frame_index < 0
+        ):
+            raise ActionAggregationError("frame_index must be a non-negative integer")
+        if not isinstance(self.per_agent_totals, ResourceAccountingTotals) or not isinstance(
+            self.population_totals, ResourceAccountingTotals
+        ):
+            raise ActionAggregationError(
+                "conservation audit requires validated accounting totals"
+            )
+
+    @property
+    def mismatched_fields(self) -> tuple[str, ...]:
+        """Fields that fail exact per-agent-to-population reconciliation."""
+
+        return tuple(
+            field
+            for field in _ACCOUNTING_TOTAL_FIELDS
+            if getattr(self.per_agent_totals, field)
+            != getattr(self.population_totals, field)
+        )
+
+    @property
+    def passed(self) -> bool:
+        return not self.mismatched_fields
+
+    def require_conserved(self) -> AccountingConservationAudit:
+        """Return this audit when valid; otherwise fail with reproducible context."""
+
+        mismatches = self.mismatched_fields
+        if mismatches:
+            raise ActionAggregationError(
+                "per-agent resource accounting does not conserve population totals",
+                context={
+                    "trace_id": self.trace_id,
+                    "frame_index": self.frame_index,
+                    "mismatched_fields": mismatches,
+                    "per_agent_totals": self.per_agent_totals.as_dict(),
+                    "population_totals": self.population_totals.as_dict(),
+                },
+            )
+        return self
+
+
+@dataclass(frozen=True, slots=True)
 class FrameActionLedger:
     """Canonical per-packet rows and exact current-frame resource totals."""
 
@@ -516,11 +661,42 @@ class FrameActionLedger:
     def total_reward(self) -> float:
         return -self.total_activation_cost
 
+    @property
+    def population_totals(self) -> ResourceAccountingTotals:
+        """Published frame aggregates in the same schema as summed agent rows."""
+
+        return ResourceAccountingTotals(
+            active_pairs=self.active_pairs,
+            reserved_rf_attempts=self.total_reserved_rf_attempts,
+            vlc_activations=self.total_vlc_activations,
+            rf_using_pairs=self.rf_using_pairs,
+            vlc_using_pairs=self.vlc_using_pairs,
+            duplicated_pairs=self.duplicated_pairs,
+            rf_reservation_releases=len(self.released_rf_pair_ids),
+            activation_cost=self.total_activation_cost,
+            reward=self.total_reward,
+        )
+
+    def audit_accounting_conservation(self) -> AccountingConservationAudit:
+        """Reconcile every resource total against one captured set of agent rows."""
+
+        audit = AccountingConservationAudit(
+            trace_id=self.trace_id,
+            frame_index=self.frame_index,
+            per_agent_totals=ResourceAccountingTotals.from_records(
+                self.pair_accounting
+            ),
+            population_totals=self.population_totals,
+        )
+        return audit.require_conserved()
+
 
 __all__ = [
+    "AccountingConservationAudit",
     "ActionAggregationError",
     "FrameActionLedger",
     "PairActionLifecycle",
     "PairActionReservation",
     "PairResourceAccounting",
+    "ResourceAccountingTotals",
 ]
