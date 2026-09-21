@@ -295,7 +295,7 @@ Per-agent accounting sums exactly to population totals for all nine actions, and
 
 ## Phase 4 — Shared RF-pool dynamics
 
-Status (2026-09-20): **in progress**. The Phase 4 input boundary now accepts
+Status (2026-09-20): **complete**. The Phase 4 input boundary now accepts
 only a complete, conservation-audited population action ledger and snapshots
 the current frame's canonical per-pair RF reservations. Its unclipped
 ``offered_rf_attempts`` is exactly contract quantity ``D_t``; VLC-only and empty
@@ -338,6 +338,15 @@ holding 200 active pairs fixed. The sweep covers all three declared sensing
 bands at sensed fractions zero, one-half, and one. Collision risk never falls,
 is strictly increasing once a focal attempt has a contender, and continues to
 increase from saturation to overload even while clipped CBR remains one.
+Independent closed-form checks now cover zero demand, a lone focal attempt,
+one below saturation, exact saturation, first overload, and twice-capacity
+demand. They derive airtime, utilization, CBR, contenders, hidden contenders,
+and collision probability directly from frozen primitives, using a stable
+``log1p``/``expm1`` birthday calculation rather than the production helpers.
+The zero-sensed-fraction limit also confirms that sensitivity-band differences
+vanish. The legacy fixed-point allocator is intentionally not used as a numeric
+oracle here because it solves a fractional allocation equilibrium rather than
+the realized integer-reservation boundary; its oracle role remains in Phase 6.
 
 ### Objective
 
@@ -352,7 +361,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 - [x] Expose only delayed or measured congestion information to the next actor observation.
 - [x] Test empty, light-load, saturation, and overload conditions.
 - [x] Test monotonicity: increasing offered RF load must not reduce collision risk under fixed channel conditions.
-- [ ] Cross-check limiting cases against analytical calculations or the existing fixed-point oracle.
+- [x] Cross-check limiting cases against analytical calculations or the existing fixed-point oracle.
 
 ### Deliverables
 
@@ -717,6 +726,8 @@ local observation. A named four-regime suite now validates the complete path
 from current joint demand through RF-pool diagnostics to that delayed actor
 suffix. Adjacent-load sweeps now establish collision-risk monotonicity through
 twice the headline pool capacity under every declared sensing band and three
-fixed sensed-fraction conditions. Implement the final Phase 4 task by
-cross-checking limiting cases against independent analytical calculations or
-the existing fixed-point oracle.
+fixed sensed-fraction conditions. Independent stable closed-form calculations
+now verify the RF-pool response at its zero-load, focal-only, saturation, and
+overload limits, completing Phase 4. Begin Phase 5 by implementing a
+Gymnasium-compatible environment API or documenting the intentional deviation
+required by the variable-population multi-agent frame contract.
