@@ -52,6 +52,7 @@ from hybrid_v2x_rl.core.enums import Action as ObservedAction
 from hybrid_v2x_rl.core.enums import Link
 from hybrid_v2x_rl.core.geometry import Point, Segment
 from hybrid_v2x_rl.core.intersection_context import JunctionGrid, intersection_context
+from hybrid_v2x_rl.core.policy_actions import PolicyAction, action_resources
 from hybrid_v2x_rl.env.episodes import PairInstant
 from hybrid_v2x_rl.env.packet import Action
 from hybrid_v2x_rl.observation.blockage import BlockerShape, blockage_probability
@@ -143,6 +144,16 @@ class Perception:
         default_factory=dict, repr=False)
     _neighbours: dict[str, int] = field(default_factory=dict, repr=False)
 
+    def reset(self) -> None:
+        """Clear every observation-side state at a sampled-episode boundary."""
+
+        self.tracks = TrackStore(forget_after_s=self.tracks.forget_after_s)
+        self._links.clear()
+        self._sensed_at = None
+        self._predicted.clear()
+        self._cells.clear()
+        self._neighbours.clear()
+
     def _link_state(self, pair_id: str) -> LinkStateTracker:
         state = self._links.get(pair_id)
         if state is None:
@@ -162,12 +173,22 @@ class Perception:
 
         if self._sensed_at == instant.time_s:
             return
-        samples = sense_frame(
-            instant.neighbours,
-            now_s=instant.time_s,
-            sensor=self.sensor,
-            root_seed=self.root_seed,
-            trace_id=instant.trace_id,
+        measured_at_s = self.sensor.latest_measurement_time_s(instant.time_s)
+        # At the physical start of a trace the first delayed awareness message
+        # has not arrived yet.  A negative measurement tick is neither valid
+        # state nor a valid randomness identity; the causal result is simply
+        # an empty sweep until the first report becomes available.
+        samples = (
+            ()
+            if measured_at_s < 0.0
+            else sense_frame(
+                instant.neighbours,
+                now_s=instant.time_s,
+                sensor=self.sensor,
+                root_seed=self.root_seed,
+                trace_id=instant.trace_id,
+                measured_at_s=measured_at_s,
+            )
         )
         self.tracks.update(samples, now_s=instant.time_s)
         # Forecast every live track once per frame. A predicted state depends
@@ -331,6 +352,48 @@ class Perception:
             ) from None
         self._link_state(pair_id).record(
             action=observed, at_s=at_s, delivered=delivered, measurements=measurements
+        )
+
+    def record_policy_feedback(
+        self,
+        pair_id: str,
+        *,
+        action: PolicyAction,
+        at_s: float,
+        delivered: bool,
+        measurements: dict[Link, float] | None = None,
+    ) -> None:
+        """Record causal receiver reports for the nine-action RL contract.
+
+        ``measurements`` is already degraded, quantized feedback in ``[0, 1]``;
+        exact simulator quality is not accepted at this boundary.  The action's
+        resource mapping determines which histories may be refreshed.
+        """
+
+        if not isinstance(action, PolicyAction):
+            raise TypeError("policy feedback requires a PolicyAction")
+        resources = action_resources(action)
+        offered = dict(measurements or {})
+        allowed = {
+            link
+            for link, active in (
+                (Link.RF, resources.uses_rf),
+                (Link.VLC, resources.uses_vlc),
+            )
+            if active
+        }
+        for link, value in offered.items():
+            if link not in allowed:
+                raise ValueError(
+                    f"action {action.label} cannot report unused {link.value} quality"
+                )
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError("reported link quality must be finite and lie in [0, 1]")
+        self._link_state(pair_id).record_policy(
+            action=action,
+            at_s=at_s,
+            delivered=delivered,
+            measurements=offered,
         )
 
     def release(self, pair_id: str) -> None:

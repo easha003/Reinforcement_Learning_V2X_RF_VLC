@@ -89,6 +89,50 @@ The current profile has one hardware configuration for every pair, so the mask
 is deliberately population-wide. Agent-specific hardware and per-agent action
 spaces remain deferred scope.
 
+## Causal actor-observation assembly
+
+`CausalActorObservationAssembler` is the pre-action boundary between a Phase 2
+`PopulationFrame` and the actor rows accepted by the population binding. For
+each canonical active pair it constructs the inherited `PairInstant` view over
+the current trace frame, then delegates the local row to `Perception`. That
+path exposes only noisy, delayed tracks, causal map context, a probabilistic
+blockage forecast, a sensed neighbour-load proxy, and link reports retained
+from completed packets. It does not import exact channel outcomes into the
+row-building path.
+
+After all 35-column local rows have been materialized, the assembler appends
+the same two-column `MeanFieldSignal` frozen by `begin_frame`. The signal is
+either reset encoding `[0, 0]` or the audited RF-attempt fraction and validity
+bit queued when the preceding frame closed. The current frame's actions,
+demand, CBR, collision probability, and outcomes are not arguments to
+`begin_frame` and cannot affect its returned immutable tuples.
+
+An active pair whose transmitter or receiver has no live causal track is
+represented as a stable-ID `CausalActorRow(values=None)`. No zero or
+plausible-looking feature vector is fabricated. `usable_mask` and
+`unusable_pair_ids` make that state explicit; only `usable_actor_rows` may be
+sent to the policy. The complete environment will apply the configured
+`DUP-4` fallback and `learn_mask = 0` when it assembles actions for such a row.
+At physical trace time zero, sensor latency means no awareness report has yet
+arrived; the first frame therefore follows this explicit unusable path instead
+of creating a negative measurement tick or pretending current truth was sensed.
+
+Once observations exist, exactly one feedback record is required per active
+pair before the frame closes. The record carries the persistent nine-action
+`PolicyAction`, the sampled delivery bit, and only already degraded,
+quantized link reports in `[0, 1]`. The resource map rejects reports for a
+medium the action did not use. Availability must fall between the decision
+time and the packet deadline, so a future report cannot be inserted into
+history. Closing then queues the audited population response for the next
+frame. Reset clears perception tracks, pair histories, and delayed congestion
+together.
+
+This also repairs an inherited vocabulary mismatch: the feasibility simulator
+stored only three RF/VLC/DUP action identities. Phase 5 link state now has a
+dedicated nine-action recording path, so `previous_action` retains the exact
+contract index `0..8`; RF-1 through RF-4 and DUP-1 through DUP-4 are not
+collapsed merely because they refresh the same physical media.
+
 ## Observation boundary
 
 `FrameObservation` contains only:

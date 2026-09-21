@@ -32,6 +32,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from hybrid_v2x_rl.core.enums import Action, Link
+from hybrid_v2x_rl.core.policy_actions import PolicyAction, action_resources
 
 #: Legs each action actually transmits on, and therefore refreshes.
 LEGS_USED: dict[Action, frozenset[Link]] = {
@@ -39,6 +40,8 @@ LEGS_USED: dict[Action, frozenset[Link]] = {
     Action.VLC: frozenset({Link.VLC}),
     Action.DUP: frozenset({Link.RF, Link.VLC}),
 }
+
+ObservedAction = Action | PolicyAction
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +122,7 @@ class LinkStateTracker:
     history_packets: int
     rf: LinkHistory = field(init=False)
     vlc: LinkHistory = field(init=False)
-    previous_action: Action | None = None
+    previous_action: ObservedAction | None = None
     last_delivered: bool | None = None
     consecutive_misses: int = 0
     packets_seen: int = 0
@@ -149,8 +152,61 @@ class LinkStateTracker:
         test still passed, and the paper's sequential claim with it.
         """
 
+        self._record(
+            action=action,
+            used=LEGS_USED[action],
+            at_s=at_s,
+            delivered=delivered,
+            measurements=measurements,
+        )
+
+    def record_policy(
+        self,
+        *,
+        action: PolicyAction,
+        at_s: float,
+        delivered: bool,
+        measurements: dict[Link, float] | None = None,
+    ) -> None:
+        """Apply feedback for one action in the nine-action RL contract.
+
+        Unlike the inherited three-action interface, the exact persistent
+        policy index is retained in ``previous_action``.  RF-1 through RF-4
+        therefore remain distinguishable to the next actor observation even
+        though they refresh the same physical leg.
+        """
+
+        if not isinstance(action, PolicyAction):
+            raise TypeError("policy feedback requires a PolicyAction")
+        resources = action_resources(action)
+        used = frozenset(
+            link
+            for link, active in (
+                (Link.RF, resources.uses_rf),
+                (Link.VLC, resources.uses_vlc),
+            )
+            if active
+        )
+        self._record(
+            action=action,
+            used=used,
+            at_s=at_s,
+            delivered=delivered,
+            measurements=measurements,
+        )
+
+    def _record(
+        self,
+        *,
+        action: ObservedAction,
+        used: frozenset[Link],
+        at_s: float,
+        delivered: bool,
+        measurements: dict[Link, float] | None,
+    ) -> None:
+        """Shared state update after either action vocabulary is resolved."""
+
         offered = dict(measurements or {})
-        used = LEGS_USED[action]
         for link in offered:
             if link not in used:
                 raise ValueError(
@@ -201,6 +257,7 @@ __all__ = [
     "LEGS_USED",
     "LinkHistory",
     "LinkStateTracker",
+    "ObservedAction",
     "QualityReading",
     "replay",
 ]

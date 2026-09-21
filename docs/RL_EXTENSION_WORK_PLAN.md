@@ -396,7 +396,17 @@ one keyed actor row per active ID, and replicates the Phase 3 profile mask for
 each row. It reports entered, continuing, and exited stable IDs across changing
 populations, processes empty frames without dropping time, rejects frame gaps
 or trace drift, and forbids a retired ID from reappearing without a new episode
-identity. Reset clears identity history at the sampled-episode boundary.
+identity. Reset clears identity history at the sampled-episode boundary. The
+causal actor-observation assembler now adapts each simultaneous Phase 2 pair to
+the existing noisy/delayed perception boundary, freezes all local rows before
+accepting current outcomes, and appends only the preceding frame's mean-field
+signal. Unavailable tracks remain explicit `None` rows for fallback handling
+rather than fabricated vectors, including the physical trace-start frame before
+the first latency-delayed awareness report arrives. Link feedback is accepted
+once per active pair, only within the packet deadline, and only as bounded
+reports for media actually used. The exact persistent nine-action index is
+retained as `previous_action`, while reset clears tracks, pair histories, and
+delayed population state together.
 
 ### Objective
 
@@ -428,7 +438,7 @@ Advance to the next population frame
 
 - [x] Implement a Gymnasium-compatible API or document any intentional deviation.
 - [x] Support variable numbers of active agents with masks and stable agent IDs.
-- [ ] Construct causal actor observations from trace state and past feedback only.
+- [x] Construct causal actor observations from trace state and past feedback only.
 - [ ] Keep centralized critic information separate from actor observations.
 - [ ] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
 - [ ] Handle pair birth without fabricated history.
@@ -753,5 +763,9 @@ overload limits, completing Phase 4. Phase 5 now has a typed, validated
 Gymnasium-shaped multi-agent frame API and an explicit record of its necessary
 scalar-API deviation. A chronological population binding now preserves stable
 pair identity and mask alignment through entries, continuations, exits, and
-empty frames. Implement the next Phase 5 task by constructing causal actor
-observations from trace state and past feedback only.
+empty frames. A frame-ordered causal assembler now builds each local row from
+noisy delayed trace perception, retains only past action-dependent link
+feedback, appends the preceding frame's population signal, and represents a
+missing causal track without inventing a numeric observation. Implement the
+next Phase 5 task by keeping centralized critic information separate from
+actor observations.
