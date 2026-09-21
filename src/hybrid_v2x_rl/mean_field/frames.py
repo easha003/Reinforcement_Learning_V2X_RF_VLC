@@ -166,6 +166,16 @@ class PairLifecycle:
     end_reason: PairEndReason | None = None
 
     def __post_init__(self) -> None:
+        if any(
+            type(value) is not bool
+            for value in (
+                self.born,
+                self.terminated,
+                self.truncated,
+                self.bootstrap_valid,
+            )
+        ):
+            raise ValueError("pair lifecycle flags must be booleans")
         if self.terminated and self.truncated:
             raise ValueError("a pair cannot be both terminated and truncated")
         if self.end_reason is None:
@@ -208,10 +218,16 @@ class PopulationPair:
     lifecycle: PairLifecycle
 
     def __post_init__(self) -> None:
-        if not self.pair_id.strip():
+        if not isinstance(self.pair_id, str) or not self.pair_id.strip():
             raise ValueError("pair_id must be a non-empty string")
-        if self.episode_step < 0:
+        if (
+            not isinstance(self.episode_step, int)
+            or isinstance(self.episode_step, bool)
+            or self.episode_step < 0
+        ):
             raise ValueError("episode_step must be non-negative")
+        if not isinstance(self.lifecycle, PairLifecycle):
+            raise ValueError("pair lifecycle must be a PairLifecycle")
         if self.lifecycle.born != (self.episode_step == 0):
             raise ValueError(
                 "born must be true exactly on pair episode step zero"
@@ -331,6 +347,162 @@ class PopulationFrame:
         """Endpoint assignments participating in a multiplicity above one."""
 
         return sum(count for _, count in self.endpoint_multiplicities if count > 1)
+
+
+@dataclass(slots=True)
+class PopulationLifecycleTracker:
+    """Fail-closed state machine for cross-frame pair lifecycle transitions.
+
+    Per-row constructors validate a lifecycle in isolation.  This tracker adds
+    the temporal facts that no single frame can prove: continuing pairs advance
+    exactly one episode step, new later arrivals are births, final or vanished
+    identities never reappear, and a live pair cannot silently disappear.
+
+    The first observed frame is intentionally a reset boundary.  It may contain
+    continuing rows when a rollout starts inside an existing trace episode.
+    Call :meth:`reset` before binding the tracker to another trace.
+    """
+
+    _trace_id: str | None = field(default=None, init=False, repr=False)
+    _previous_frame_index: int | None = field(default=None, init=False, repr=False)
+    _previous_time_s: float | None = field(default=None, init=False, repr=False)
+    _previous_pairs: dict[str, PopulationPair] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _seen_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _completed_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _observed_frames: int = field(default=0, init=False, repr=False)
+
+    def reset(self) -> None:
+        """Forget one trace only at an explicit environment reset boundary."""
+
+        self._trace_id = None
+        self._previous_frame_index = None
+        self._previous_time_s = None
+        self._previous_pairs.clear()
+        self._seen_pair_ids.clear()
+        self._completed_pair_ids.clear()
+        self._observed_frames = 0
+
+    def observe(self, frame: PopulationFrame) -> None:
+        """Validate one chronological frame and commit it as current state."""
+
+        if not isinstance(frame, PopulationFrame):
+            raise FrameReplayError("lifecycle tracking requires a PopulationFrame")
+        if self._trace_id is None:
+            self._accept(frame)
+            return
+        if frame.trace_id != self._trace_id:
+            raise FrameReplayError(
+                "population lifecycle cannot cross traces without reset",
+                context={"active_trace_id": self._trace_id, "actual": frame.trace_id},
+            )
+        assert self._previous_frame_index is not None
+        expected_index = self._previous_frame_index + 1
+        if frame.index != expected_index:
+            raise FrameReplayError(
+                "population frames must advance by exactly one index",
+                context={"actual": frame.index, "expected": expected_index},
+            )
+        assert self._previous_time_s is not None
+        if frame.time_s <= self._previous_time_s:
+            raise FrameReplayError(
+                "population frame time must increase strictly",
+                context={
+                    "actual": frame.time_s,
+                    "previous": self._previous_time_s,
+                },
+            )
+
+        current = {pair.pair_id: pair for pair in frame.pairs}
+        missing_live = tuple(
+            pair_id
+            for pair_id, pair in self._previous_pairs.items()
+            if not pair.lifecycle.final and pair_id not in current
+        )
+        if missing_live:
+            raise FrameReplayError(
+                "a non-final pair disappeared from the next population frame",
+                context={"pair_ids": missing_live, "frame_index": frame.index},
+            )
+
+        for pair in frame.pairs:
+            previous = self._previous_pairs.get(pair.pair_id)
+            if previous is None:
+                if pair.pair_id in self._seen_pair_ids:
+                    raise FrameReplayError(
+                        "a completed or disappeared pair identity reappeared",
+                        context={"pair_id": pair.pair_id, "frame_index": frame.index},
+                    )
+                if not pair.lifecycle.born:
+                    raise FrameReplayError(
+                        "a pair first seen after reset must be marked born",
+                        context={"pair_id": pair.pair_id, "frame_index": frame.index},
+                    )
+                continue
+            if previous.lifecycle.final:
+                raise FrameReplayError(
+                    "a final pair remained active in the next population frame",
+                    context={"pair_id": pair.pair_id, "frame_index": frame.index},
+                )
+            if pair.lifecycle.born:
+                raise FrameReplayError(
+                    "a continuing pair cannot be marked born again",
+                    context={"pair_id": pair.pair_id, "frame_index": frame.index},
+                )
+            expected_step = previous.episode_step + 1
+            if pair.episode_step != expected_step:
+                raise FrameReplayError(
+                    "a continuing pair must advance by exactly one episode step",
+                    context={
+                        "pair_id": pair.pair_id,
+                        "actual": pair.episode_step,
+                        "expected": expected_step,
+                    },
+                )
+            if pair.endpoint_ids != previous.endpoint_ids:
+                raise FrameReplayError(
+                    "pair endpoints cannot change within one episode",
+                    context={
+                        "pair_id": pair.pair_id,
+                        "actual": pair.endpoint_ids,
+                        "expected": previous.endpoint_ids,
+                    },
+                )
+
+        self._accept(frame)
+
+    def _accept(self, frame: PopulationFrame) -> None:
+        current = {pair.pair_id: pair for pair in frame.pairs}
+        self._trace_id = frame.trace_id
+        self._previous_frame_index = frame.index
+        self._previous_time_s = frame.time_s
+        self._previous_pairs = current
+        self._seen_pair_ids.update(current)
+        self._completed_pair_ids.update(
+            pair.pair_id for pair in frame.pairs if pair.lifecycle.final
+        )
+        self._observed_frames += 1
+
+    @property
+    def observed_frames(self) -> int:
+        return self._observed_frames
+
+    @property
+    def live_pair_ids(self) -> tuple[str, ...]:
+        """Pairs that must either continue or end in the next observed frame."""
+
+        return tuple(
+            pair_id
+            for pair_id, pair in self._previous_pairs.items()
+            if not pair.lifecycle.final
+        )
+
+    @property
+    def completed_pair_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._completed_pair_ids))
 
 
 @dataclass(frozen=True, slots=True)
@@ -776,6 +948,7 @@ class PopulationFrameReader:
         ):
             raise ValueError("max_frames must be a positive integer or None")
         active: dict[str, PairEpisodeSchedule] = {}
+        lifecycle_tracker = PopulationLifecycleTracker()
         next_index = 0
         for time_s, vehicles in _iter_vehicle_frames(self.trace):
             expected = (
@@ -793,12 +966,14 @@ class PopulationFrameReader:
                         "next_vehicle_time_s": time_s,
                     },
                 )
-            yield self._build_frame(
+            frame = self._build_frame(
                 frame_index=next_index,
                 time_s=expected,
                 vehicles=vehicles,
                 active=active,
             )
+            lifecycle_tracker.observe(frame)
+            yield frame
             next_index += 1
             if max_frames is not None and next_index >= max_frames:
                 return
@@ -997,6 +1172,7 @@ __all__ = [
     "PairLifecycle",
     "PopulationFrame",
     "PopulationFrameReader",
+    "PopulationLifecycleTracker",
     "PopulationPair",
     "TraceCatalog",
     "TraceSplit",

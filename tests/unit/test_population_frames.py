@@ -18,8 +18,11 @@ from hybrid_v2x_rl.mean_field.frame_campaign import validate_frame_campaign
 from hybrid_v2x_rl.mean_field.frames import (
     FrameReplayError,
     FrameTraceSource,
+    PairLifecycle,
     PopulationFrame,
     PopulationFrameReader,
+    PopulationLifecycleTracker,
+    PopulationPair,
     TraceCatalog,
 )
 from hybrid_v2x_rl.mobility.trace_io import MobilityTraceWriter, VehicleTraceRecord
@@ -115,6 +118,46 @@ def _reader(trace_path: Path) -> PopulationFrameReader:
     )
 
 
+def _runtime_frame(
+    index: int,
+    specs: tuple[tuple[str, int, PairLifecycle, int, int], ...],
+    *,
+    trace_id: str = TRACE_ID,
+    time_s: float | None = None,
+) -> PopulationFrame:
+    frame_time = index * 0.1 if time_s is None else time_s
+    vehicle_indices = sorted(
+        {vehicle for _, _, _, tx, rx in specs for vehicle in (tx, rx)}
+    )
+    vehicles = tuple(
+        _vehicle(trace_id, frame_time, vehicle) for vehicle in vehicle_indices
+    )
+    by_id = {vehicle.vehicle_id: vehicle for vehicle in vehicles}
+    pairs = tuple(
+        PopulationPair(
+            pair_id=pair_id,
+            episode_step=episode_step,
+            transmitter=by_id[f"veh-{tx}"],
+            receiver=by_id[f"veh-{rx}"],
+            lifecycle=lifecycle,
+        )
+        for pair_id, episode_step, lifecycle, tx, rx in sorted(specs)
+    )
+    return PopulationFrame(
+        source=FrameTraceSource(
+            path=Path(trace_id),
+            trace_id=trace_id,
+            split="train",
+            density=10.0,
+            replicate=0,
+        ),
+        index=index,
+        time_s=frame_time,
+        vehicles=vehicles,
+        pairs=pairs,
+    )
+
+
 def _signature(frames: list[PopulationFrame]) -> list[tuple[object, ...]]:
     return [
         (
@@ -200,6 +243,236 @@ def test_lifecycle_flags_distinguish_birth_termination_and_both_truncations(
     assert trace_end.truncated and not trace_end.terminated
     assert not trace_end.bootstrap_valid
     assert trace_end.end_reason == "trace_end"
+
+
+def test_cross_frame_lifecycle_tracker_accepts_legal_births_and_endings() -> None:
+    tracker = PopulationLifecycleTracker()
+    tracker.observe(
+        _runtime_frame(
+            5,
+            (("pair-a", 5, PairLifecycle(born=False), 1, 2),),
+        )
+    )
+    tracker.observe(
+        _runtime_frame(
+            6,
+            (
+                ("pair-a", 6, PairLifecycle(born=False), 1, 2),
+                ("pair-b", 0, PairLifecycle(born=True), 3, 4),
+            ),
+        )
+    )
+    tracker.observe(
+        _runtime_frame(
+            7,
+            (
+                (
+                    "pair-a",
+                    7,
+                    PairLifecycle(
+                        born=False,
+                        terminated=True,
+                        end_reason="route_diverged",
+                    ),
+                    1,
+                    2,
+                ),
+                (
+                    "pair-b",
+                    1,
+                    PairLifecycle(
+                        born=False,
+                        truncated=True,
+                        bootstrap_valid=True,
+                        end_reason="max_duration",
+                    ),
+                    3,
+                    4,
+                ),
+            ),
+        )
+    )
+    tracker.observe(_runtime_frame(8, ()))
+
+    assert tracker.observed_frames == 4
+    assert tracker.live_pair_ids == ()
+    assert tracker.completed_pair_ids == ("pair-a", "pair-b")
+
+
+def test_nonfinal_pair_cannot_disappear_and_failed_check_does_not_advance() -> None:
+    tracker = PopulationLifecycleTracker()
+    tracker.observe(
+        _runtime_frame(
+            0,
+            (("pair-a", 0, PairLifecycle(born=True), 1, 2),),
+        )
+    )
+
+    with pytest.raises(FrameReplayError, match="non-final pair disappeared"):
+        tracker.observe(_runtime_frame(1, ()))
+
+    tracker.observe(
+        _runtime_frame(
+            1,
+            (("pair-a", 1, PairLifecycle(born=False), 1, 2),),
+        )
+    )
+    assert tracker.observed_frames == 2
+
+
+@pytest.mark.parametrize(
+    "next_frame, message",
+    [
+        pytest.param(
+            _runtime_frame(
+                1,
+                (("pair-a", 2, PairLifecycle(born=False), 1, 2),),
+            ),
+            "episode step",
+            id="step-jump",
+        ),
+        pytest.param(
+            _runtime_frame(
+                1,
+                (("pair-a", 1, PairLifecycle(born=False), 1, 3),),
+            ),
+            "endpoints",
+            id="endpoint-change",
+        ),
+        pytest.param(
+            _runtime_frame(
+                2,
+                (("pair-a", 1, PairLifecycle(born=False), 1, 2),),
+            ),
+            "exactly one index",
+            id="frame-index-jump",
+        ),
+        pytest.param(
+            _runtime_frame(
+                1,
+                (("pair-a", 1, PairLifecycle(born=False), 1, 2),),
+                time_s=0.0,
+            ),
+            "increase strictly",
+            id="time-not-increasing",
+        ),
+    ],
+)
+def test_illegal_continuing_pair_transition_is_rejected(
+    next_frame: PopulationFrame,
+    message: str,
+) -> None:
+    tracker = PopulationLifecycleTracker()
+    tracker.observe(
+        _runtime_frame(
+            0,
+            (("pair-a", 0, PairLifecycle(born=True), 1, 2),),
+        )
+    )
+
+    with pytest.raises(FrameReplayError, match=message):
+        tracker.observe(next_frame)
+
+
+def test_late_pair_requires_birth_and_completed_identity_cannot_reappear() -> None:
+    tracker = PopulationLifecycleTracker()
+    tracker.observe(_runtime_frame(0, ()))
+    with pytest.raises(FrameReplayError, match="marked born"):
+        tracker.observe(
+            _runtime_frame(
+                1,
+                (("pair-a", 1, PairLifecycle(born=False), 1, 2),),
+            )
+        )
+
+    tracker.observe(
+        _runtime_frame(
+            1,
+            (
+                (
+                    "pair-a",
+                    0,
+                    PairLifecycle(
+                        born=True,
+                        terminated=True,
+                        end_reason="vehicle_missing",
+                    ),
+                    1,
+                    2,
+                ),
+            ),
+        )
+    )
+    tracker.observe(_runtime_frame(2, ()))
+    with pytest.raises(FrameReplayError, match="reappeared"):
+        tracker.observe(
+            _runtime_frame(
+                3,
+                (("pair-a", 0, PairLifecycle(born=True), 1, 2),),
+            )
+        )
+
+
+def test_final_pair_cannot_continue_and_trace_switch_requires_reset() -> None:
+    tracker = PopulationLifecycleTracker()
+    tracker.observe(
+        _runtime_frame(
+            0,
+            (
+                (
+                    "pair-a",
+                    0,
+                    PairLifecycle(
+                        born=True,
+                        truncated=True,
+                        end_reason="trace_end",
+                    ),
+                    1,
+                    2,
+                ),
+            ),
+        )
+    )
+    with pytest.raises(FrameReplayError, match="final pair remained"):
+        tracker.observe(
+            _runtime_frame(
+                1,
+                (("pair-a", 1, PairLifecycle(born=False), 1, 2),),
+            )
+        )
+    with pytest.raises(FrameReplayError, match="cannot cross traces"):
+        tracker.observe(
+            _runtime_frame(
+                1,
+                (),
+                trace_id="synthetic-d10-train-001",
+            )
+        )
+
+    tracker.reset()
+    tracker.observe(
+        _runtime_frame(
+            1,
+            (),
+            trace_id="synthetic-d10-train-001",
+        )
+    )
+    assert tracker.observed_frames == 1
+
+
+def test_lifecycle_flags_and_episode_steps_require_exact_scalar_types() -> None:
+    with pytest.raises(ValueError, match="booleans"):
+        PairLifecycle(born=1)  # type: ignore[arg-type]
+    vehicle_a = _vehicle(TRACE_ID, 0.0, 1)
+    vehicle_b = _vehicle(TRACE_ID, 0.0, 2)
+    with pytest.raises(ValueError, match="episode_step"):
+        PopulationPair(
+            pair_id="pair-a",
+            episode_step=True,  # type: ignore[arg-type]
+            transmitter=vehicle_a,
+            receiver=vehicle_b,
+            lifecycle=PairLifecycle(born=False),
+        )
 
 
 def test_replay_is_deterministic_and_reconciles_source_counts(trace_path: Path) -> None:

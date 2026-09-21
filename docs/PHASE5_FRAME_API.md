@@ -243,6 +243,17 @@ API objects fail closed on:
 - missing or unexpected final observations at a truncation boundary;
 - disagreement between explicit IDs and IDs supplied through `info`.
 
+Before `step`, `FrameAPISchema.validate_actions` requires one `int64` action
+per current pair, rejects indices outside `[0,8]`, and rejects a selection that
+is false in that pair's action-mask row. Standard `sampled_miss_cost` and
+`conditional_miss_probability` arrays carried through step `info` are also
+shape checked, required to be finite, constrained to binary and `[0,1]`
+respectively, and frozen with the core step arrays.
+
+Cross-frame birth, continuation, and ending rules are enforced by
+`PopulationLifecycleTracker`; see `PHASE5_INVARIANTS.md` for the state machine
+and reset semantics.
+
 Arrays are copied into contiguous read-only storage, and step `info` is exposed
 through a read-only mapping. This prevents callers from mutating an already
 validated transition after it enters a rollout buffer.

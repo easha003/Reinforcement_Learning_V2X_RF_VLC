@@ -65,6 +65,65 @@ def test_headline_schema_is_derived_as_37_actor_columns_and_nine_actions() -> No
     schema.validate_observation(observation)
 
 
+def test_selected_actions_are_mask_checked_and_frozen_before_step() -> None:
+    schema = _schema()
+    masks = np.ones((2, CONTRACT_ACTION_COUNT), dtype=np.bool_)
+    masks[1, 0] = False
+    observation = replace(_observation(), action_masks=masks)
+    actions = np.array([0, 8], dtype=np.int64)
+
+    validated = schema.validate_actions(observation, actions)
+
+    actions[0] = 7
+    assert validated.tolist() == [0, 8]
+    assert not validated.flags.writeable
+
+
+@pytest.mark.parametrize(
+    "actions, message",
+    [
+        pytest.param(
+            np.array([0, 1], dtype=np.int32),
+            "int64",
+            id="wrong-dtype",
+        ),
+        pytest.param(
+            np.array([[0, 1]], dtype=np.int64),
+            "align one-to-one",
+            id="wrong-shape",
+        ),
+        pytest.param(
+            np.array([-1, 1], dtype=np.int64),
+            "outside",
+            id="negative-index",
+        ),
+        pytest.param(
+            np.array([0, CONTRACT_ACTION_COUNT], dtype=np.int64),
+            "outside",
+            id="too-large",
+        ),
+    ],
+)
+def test_selected_action_batch_fails_closed_on_invalid_policy_output(
+    actions: np.ndarray,
+    message: str,
+) -> None:
+    with pytest.raises(FrameAPIError, match=message):
+        _schema().validate_actions(_observation(), actions)  # type: ignore[arg-type]
+
+
+def test_selected_action_must_be_enabled_by_its_own_row_mask() -> None:
+    masks = np.ones((2, CONTRACT_ACTION_COUNT), dtype=np.bool_)
+    masks[1, 8] = False
+    observation = replace(_observation(), action_masks=masks)
+
+    with pytest.raises(FrameAPIError, match="enabled"):
+        _schema().validate_actions(
+            observation,
+            np.array([8, 8], dtype=np.int64),
+        )
+
+
 def test_frame_observation_preserves_canonical_ids_and_freezes_arrays() -> None:
     actor = np.zeros((2, CONTRACT_ACTOR_WIDTH), dtype=np.float32)
     masks = np.ones((2, CONTRACT_ACTION_COUNT), dtype=np.bool_)
@@ -206,6 +265,32 @@ def test_step_outputs_align_to_current_ids_while_next_population_may_change() ->
         output.info["new"] = "forbidden"  # type: ignore[index]
 
 
+def test_standard_cost_and_probability_info_is_validated_and_frozen() -> None:
+    sampled = np.array([0.0, 1.0], dtype=np.float32)
+    conditional = np.array([0.25, 1.0], dtype=np.float32)
+
+    output = FrameStepOutput(
+        next_observation=_observation(frame_index=5),
+        transition_pair_ids=("pair-a", "pair-b"),
+        rewards=np.zeros(2, dtype=np.float32),
+        terminated=np.zeros(2, dtype=np.bool_),
+        truncated=np.zeros(2, dtype=np.bool_),
+        bootstrap_valid=np.zeros(2, dtype=np.bool_),
+        learn_mask=np.ones(2, dtype=np.bool_),
+        info={
+            "sampled_miss_cost": sampled,
+            "conditional_miss_probability": conditional,
+        },
+    )
+
+    sampled[0] = 1.0
+    conditional[0] = 0.75
+    assert output.info["sampled_miss_cost"].tolist() == [0.0, 1.0]
+    assert output.info["conditional_miss_probability"].tolist() == [0.25, 1.0]
+    assert not output.info["sampled_miss_cost"].flags.writeable
+    assert not output.info["conditional_miss_probability"].flags.writeable
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -250,6 +335,30 @@ def test_step_outputs_align_to_current_ids_while_next_population_may_change() ->
         pytest.param(
             {"info": {"transition_pair_ids": ("pair-x", "pair-y")}},
             id="info-id-drift",
+        ),
+        pytest.param(
+            {"info": {"sampled_miss_cost": np.array([0.0, 0.5], dtype=np.float32)}},
+            id="nonbinary-sampled-cost",
+        ),
+        pytest.param(
+            {
+                "info": {
+                    "conditional_miss_probability": np.array(
+                        [0.0, np.nan], dtype=np.float32
+                    )
+                }
+            },
+            id="nonfinite-probability",
+        ),
+        pytest.param(
+            {
+                "info": {
+                    "conditional_miss_probability": np.array(
+                        [0.0, 1.01], dtype=np.float32
+                    )
+                }
+            },
+            id="out-of-range-probability",
         ),
     ],
 )

@@ -472,7 +472,7 @@ Advance to the next population frame
 - [x] Handle pair birth without fabricated history.
 - [x] Handle pair termination and trace truncation correctly for return estimation.
 - [x] Seed every stochastic component.
-- [ ] Add invariant checks for finite values, valid probabilities, valid actions, and legal lifecycle transitions.
+- [x] Add invariant checks for finite values, valid probabilities, valid actions, and legal lifecycle transitions.
 - [ ] Run long deterministic rollouts with random and scripted policies.
 
 ### Deliverables
@@ -807,6 +807,8 @@ after the final packet outcome closes. A single reset-seed authority now binds
 causal sensing, matched packet tapes, noisy feedback, correlated shadowing, and
 correlated fading to the root seed plus stable trace/pair/packet/mechanism
 identity. Pair ordering, population size, source ordering, and NumPy global RNG
-state cannot shift those draws. Implement the next Phase 5 task by adding
-invariant checks for finite values, valid probabilities, valid actions, and
-legal lifecycle transitions.
+state cannot shift those draws. Runtime invariant boundaries now reject
+non-finite targets, invalid probabilities, malformed or masked actions, and
+illegal cross-frame lifecycle transitions before they enter a rollout buffer.
+Implement the next Phase 5 task by running long deterministic rollouts with
+random and scripted policies.

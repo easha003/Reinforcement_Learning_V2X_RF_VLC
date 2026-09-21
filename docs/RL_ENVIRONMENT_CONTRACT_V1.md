@@ -475,6 +475,11 @@ Phases 2–5 must enforce and test all of the following before training:
     frames, actions under a deterministic policy, and outcomes.
 12. Train-only normalization and split isolation are mechanically tested.
 
+The Phase 5 runtime enforcement for items 1--3 and 10 is documented in
+`PHASE5_INVARIANTS.md`. In particular, policy action arrays are checked against
+the current row masks before any resource accounting, and pair lifecycle is
+checked across consecutive frames rather than only row by row.
+
 ## 13. Configuration sources
 
 | Contract quantity | Configuration source |

@@ -136,6 +136,60 @@ class FrameAPISchema:
                 },
             )
 
+    def validate_actions(
+        self,
+        observation: FrameObservation,
+        actions: ActionArray,
+    ) -> ActionArray:
+        """Validate and freeze one selected action per current actor row.
+
+        This is the authoritative pre-step boundary.  Range checking happens
+        before mask indexing so an invalid policy output can never wrap around
+        NumPy's negative indices or raise an implementation-level IndexError.
+        """
+
+        self.validate_observation(observation)
+        if not isinstance(actions, np.ndarray) or actions.dtype != np.dtype(np.int64):
+            raise FrameAPIError("actions must be an int64 ndarray")
+        expected_shape = (observation.population_size,)
+        if actions.shape != expected_shape:
+            raise FrameAPIError(
+                "actions must align one-to-one with current pair IDs",
+                context={"actual": actions.shape, "expected": expected_shape},
+            )
+        invalid = np.flatnonzero((actions < 0) | (actions >= self.action_count))
+        if invalid.size:
+            invalid_rows = tuple(int(row) for row in invalid)
+            raise FrameAPIError(
+                "selected action indices lie outside the frozen action space",
+                context={
+                    "rows": invalid_rows,
+                    "pair_ids": tuple(
+                        observation.pair_ids[row] for row in invalid_rows
+                    ),
+                    "actions": tuple(int(actions[row]) for row in invalid_rows),
+                    "valid_indices": (0, self.action_count - 1),
+                },
+            )
+        if observation.population_size:
+            row_indices = np.arange(observation.population_size, dtype=np.intp)
+            masked = np.flatnonzero(
+                ~observation.action_masks[row_indices, actions]
+            )
+            if masked.size:
+                masked_rows = tuple(int(row) for row in masked)
+                raise FrameAPIError(
+                    "selected actions must be enabled by their actor-row masks",
+                    context={
+                        "rows": masked_rows,
+                        "pair_ids": tuple(
+                            observation.pair_ids[row] for row in masked_rows
+                        ),
+                        "actions": tuple(int(actions[row]) for row in masked_rows),
+                    },
+                )
+        return cast(ActionArray, _freeze_array(actions))
+
 
 @dataclass(frozen=True, slots=True)
 class FrameObservation:
@@ -255,6 +309,35 @@ class FrameStepOutput:
         if supplied_ids is not None and supplied_ids != self.transition_pair_ids:
             raise FrameAPIError("info transition_pair_ids do not match step outputs")
         payload["transition_pair_ids"] = self.transition_pair_ids
+
+        for name, binary in (
+            ("sampled_miss_cost", True),
+            ("conditional_miss_probability", False),
+        ):
+            if name not in payload:
+                continue
+            info_value = payload[name]
+            if (
+                not isinstance(info_value, np.ndarray)
+                or info_value.dtype != np.dtype(np.float32)
+            ):
+                raise FrameAPIError(f"info {name} must be a float32 ndarray")
+            if info_value.shape != (population,):
+                raise FrameAPIError(
+                    f"info {name} must align one-to-one with transition_pair_ids",
+                    context={"actual": info_value.shape, "expected": (population,)},
+                )
+            if not bool(np.all(np.isfinite(info_value))):
+                raise FrameAPIError(f"info {name} must contain only finite values")
+            if binary:
+                valid = (info_value == 0.0) | (info_value == 1.0)
+                requirement = "be binary"
+            else:
+                valid = (info_value >= 0.0) & (info_value <= 1.0)
+                requirement = "lie in [0, 1]"
+            if not bool(np.all(valid)):
+                raise FrameAPIError(f"info {name} must {requirement}")
+            payload[name] = _freeze_array(info_value)
 
         expected_final_ids = tuple(
             pair_id
