@@ -406,7 +406,14 @@ the first latency-delayed awareness report arrives. Link feedback is accepted
 once per active pair, only within the packet deadline, and only as bounded
 reports for media actually used. The exact persistent nine-action index is
 retained as `previous_action`, while reset clears tracks, pair histories, and
-delayed population state together.
+delayed population state together. Centralized training state is now
+materialized in a separate immutable critic frame, never in
+`FrameObservation`. It validates the exact actor/population-frame identity,
+computes the 37-column mean only from frozen normalized actor rows, appends the
+configured three-density one-hot and `log1p(N_t)`, and repeats that 41-column
+suffix beside each local row to form the contract's 78-column reward/cost
+critic input. Empty frames emit no critic rows or invented mean. The actor
+tensor stays 37 columns and shares no storage with the training-only tensor.
 
 ### Objective
 
@@ -439,7 +446,7 @@ Advance to the next population frame
 - [x] Implement a Gymnasium-compatible API or document any intentional deviation.
 - [x] Support variable numbers of active agents with masks and stable agent IDs.
 - [x] Construct causal actor observations from trace state and past feedback only.
-- [ ] Keep centralized critic information separate from actor observations.
+- [x] Keep centralized critic information separate from actor observations.
 - [ ] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
 - [ ] Handle pair birth without fabricated history.
 - [ ] Handle pair termination and trace truncation correctly for return estimation.
@@ -766,6 +773,8 @@ pair identity and mask alignment through entries, continuations, exits, and
 empty frames. A frame-ordered causal assembler now builds each local row from
 noisy delayed trace perception, retains only past action-dependent link
 feedback, appends the preceding frame's population signal, and represents a
-missing causal track without inventing a numeric observation. Implement the
-next Phase 5 task by keeping centralized critic information separate from
-actor observations.
+missing causal track without inventing a numeric observation. A separate
+training-only critic boundary now constructs and validates the 78-column
+centralized tensor without altering the 37-column actor API. Implement the
+next Phase 5 task by producing reward, sampled binary miss cost, and simulator
+conditional-risk diagnostics.

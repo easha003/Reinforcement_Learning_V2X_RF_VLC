@@ -133,6 +133,44 @@ dedicated nine-action recording path, so `previous_action` retains the exact
 contract index `0..8`; RF-1 through RF-4 and DUP-1 through DUP-4 are not
 collapsed merely because they refresh the same physical media.
 
+## Centralized critic boundary
+
+`CentralizedCriticBuilder` creates a separate training-only
+`CriticObservationFrame`; it never adds fields or columns to
+`FrameObservation`. The builder accepts the exact normalized actor-facing
+frame used for action selection plus its identity-matched `PopulationFrame`.
+The population frame, rather than a caller-supplied label, is authoritative
+for density and exact active population size.
+
+For every nonempty frame, the builder calculates the frozen contract values:
+
+```text
+population mean of normalized actor rows                         37
+configured density one-hot in [10, 20, 30] order                  3
+log1p(exact active-pair count)                                    1
+training-only global summary                                     41
+actor row + training-only global summary                         78
+```
+
+All active IDs receive the same 41-column suffix while retaining their own
+37-column actor prefix. One materialized `(N_t, 78)` matrix is shared by the
+separately parameterized reward and cost critics. The schema names every
+column, derives density order from the resolved mobility configuration, and
+fails unless contract `1.0.0` remains exactly `37 + 41 = 78` with three
+density levels.
+
+The critic object independently reconciles its population mean, density
+one-hot, `log1p(N_t)`, stable IDs, and repeated suffix. Its arrays are copied,
+contiguous, and read-only. An empty population produces `(0, 78)` and no
+invented population-mean summary because it contributes no transition rows.
+
+The actor-facing object remains `(N_t, 37)` and contains no density label,
+exact population size, population mean, dual variable, current joint action,
+channel truth, or counterfactual outcome. Critic construction cannot mutate
+the actor tensor and allocates no shared-memory view. Decentralized execution
+therefore uses `FrameObservation` directly and never constructs or imputes the
+critic-only suffix.
+
 ## Observation boundary
 
 `FrameObservation` contains only:
