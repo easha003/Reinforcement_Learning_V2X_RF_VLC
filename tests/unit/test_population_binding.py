@@ -73,10 +73,15 @@ def _frame(
     index: int,
     pair_ids: tuple[str, ...],
     *,
-    born: frozenset[str] = frozenset(),
+    born: frozenset[str] | None = None,
     source: FrameTraceSource = SOURCE,
 ) -> PopulationFrame:
     time_s = 0.1 * index
+    births = (
+        frozenset(pair_ids) if index == 0 and born is None
+        else frozenset() if born is None
+        else born
+    )
     endpoint_ids = tuple(
         sorted({endpoint for pair_id in pair_ids for endpoint in ENDPOINTS[pair_id]})
     )
@@ -90,10 +95,10 @@ def _frame(
     pairs = tuple(
         PopulationPair(
             pair_id=pair_id,
-            episode_step=index,
+            episode_step=0 if pair_id in births else index,
             transmitter=vehicles[ENDPOINTS[pair_id][0]],
             receiver=vehicles[ENDPOINTS[pair_id][1]],
-            lifecycle=PairLifecycle(born=pair_id in born),
+            lifecycle=PairLifecycle(born=pair_id in births),
         )
         for pair_id in pair_ids
     )
@@ -270,3 +275,31 @@ def test_retired_id_requires_a_new_episode_identity_until_reset() -> None:
     assert fresh.delta.entered_pair_ids == ("pair-a",)
     assert fresh.delta.continuing_pair_ids == ()
     assert fresh.delta.exited_pair_ids == ()
+
+
+def test_mid_episode_entries_and_declared_births_must_match() -> None:
+    binding = _binding()
+    binding.reset(TRACE_ID)
+    first = _frame(0, ("pair-a",))
+    binding.bind_frame(first, _rows(first.active_pair_ids))
+
+    undeclared = _frame(1, ("pair-a", "pair-b"))
+    with pytest.raises(PopulationBindingError, match="declared pair births"):
+        binding.bind_frame(undeclared, _rows(undeclared.active_pair_ids))
+
+    repeated = _frame(
+        1,
+        ("pair-a",),
+        born=frozenset({"pair-a"}),
+    )
+    with pytest.raises(PopulationBindingError, match="declared pair births"):
+        binding.bind_frame(repeated, _rows(repeated.active_pair_ids))
+
+    declared = _frame(
+        1,
+        ("pair-a", "pair-b"),
+        born=frozenset({"pair-b"}),
+    )
+    accepted = binding.bind_frame(declared, _rows(declared.active_pair_ids))
+    assert accepted.delta.entered_pair_ids == ("pair-b",)
+    assert accepted.delta.continuing_pair_ids == ("pair-a",)

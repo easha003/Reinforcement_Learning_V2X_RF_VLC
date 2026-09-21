@@ -133,6 +133,19 @@ dedicated nine-action recording path, so `previous_action` retains the exact
 contract index `0..8`; RF-1 through RF-4 and DUP-1 through DUP-4 are not
 collapsed merely because they refresh the same physical media.
 
+Pair birth is an explicit state transition rather than a side effect of the
+first history lookup. `PopulationPair` requires `born` exactly at episode step
+zero. After the first sampled frame, both the causal assembler and population
+binding require the stable-ID entrants to equal the declared births. The first
+sampled frame is the deliberate exception: it may begin inside existing
+physical pair episodes, but all of its pairs still receive fresh rollout-local
+history because pre-reset feedback is unknown. `Perception` allocates a new
+empty link tracker for every such entry and rejects pre-existing history.
+Newborn qualities and their fixed-width histories are zero-padded, quality
+ages and previous action/outcome are `-1`, and consecutive misses are zero.
+Missing causal endpoint tracks still produce `values=None`. A mid-rollout birth
+does not reset continuing-pair history or the valid delayed population signal.
+
 ## Centralized critic boundary
 
 `CentralizedCriticBuilder` creates a separate training-only

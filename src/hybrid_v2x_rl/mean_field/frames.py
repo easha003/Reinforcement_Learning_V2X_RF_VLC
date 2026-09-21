@@ -212,6 +212,10 @@ class PopulationPair:
             raise ValueError("pair_id must be a non-empty string")
         if self.episode_step < 0:
             raise ValueError("episode_step must be non-negative")
+        if self.lifecycle.born != (self.episode_step == 0):
+            raise ValueError(
+                "born must be true exactly on pair episode step zero"
+            )
         if self.transmitter.vehicle_id == self.receiver.vehicle_id:
             raise ValueError("pair endpoints must identify different vehicles")
 

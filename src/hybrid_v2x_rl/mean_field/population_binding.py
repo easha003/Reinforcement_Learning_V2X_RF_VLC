@@ -206,6 +206,22 @@ class VariablePopulationBinding:
                 context={"reappeared_pair_ids": reappeared},
             )
 
+        previous_set = set(self._current_pair_ids) if self._has_current_frame else set()
+        entered = tuple(sorted(expected_set - previous_set))
+        continuing = tuple(sorted(expected_set & previous_set))
+        exited = tuple(sorted(previous_set - expected_set))
+        declared_births = tuple(
+            pair.pair_id for pair in frame.pairs if pair.lifecycle.born
+        )
+        if self._has_current_frame and entered != declared_births:
+            raise PopulationBindingError(
+                "mid-episode population entries must match declared pair births",
+                context={
+                    "entered_pair_ids": entered,
+                    "declared_birth_pair_ids": declared_births,
+                },
+            )
+
         actor_matrix = np.empty(
             (len(expected_ids), self.api_schema.actor_width),
             dtype=np.float32,
@@ -249,10 +265,6 @@ class VariablePopulationBinding:
         )
         self.api_schema.validate_observation(observation)
 
-        previous_set = set(self._current_pair_ids) if self._has_current_frame else set()
-        entered = tuple(sorted(expected_set - previous_set))
-        continuing = tuple(sorted(expected_set & previous_set))
-        exited = tuple(sorted(previous_set - expected_set))
         delta = PopulationDelta(
             entered_pair_ids=entered,
             continuing_pair_ids=continuing,

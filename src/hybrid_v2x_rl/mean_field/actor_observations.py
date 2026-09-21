@@ -51,6 +51,8 @@ class CausalPerception(Protocol):
 
     def reset(self) -> None: ...
 
+    def initialize_pair_history(self, pair_id: str) -> None: ...
+
     def observe(self, instant: PairInstant) -> tuple[float, ...] | None: ...
 
     def record_policy_feedback(
@@ -177,6 +179,9 @@ class CausalActorObservationAssembler:
     _expected_frame_index: int | None = field(default=None, init=False, repr=False)
     _open_frame: PopulationFrame | None = field(default=None, init=False, repr=False)
     _recorded_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _current_pair_ids: tuple[str, ...] = field(default=(), init=False, repr=False)
+    _retired_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _has_population_frame: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.perception, CausalPerception):
@@ -233,6 +238,42 @@ class CausalActorObservationAssembler:
         self._trace_id = trace_id
         self._expected_frame_index = start_frame_index
         self._recorded_pair_ids.clear()
+        self._current_pair_ids = ()
+        self._retired_pair_ids.clear()
+        self._has_population_frame = False
+
+    def _fresh_pair_ids(self, frame: PopulationFrame) -> tuple[str, ...]:
+        """Validate entry semantics and identify histories initialized now."""
+
+        current = set(frame.active_pair_ids)
+        if not self._has_population_frame:
+            # A sampled segment may begin inside an already-running physical
+            # pair episode.  Its pre-reset feedback is outside the rollout and
+            # must not be reconstructed, so every first-frame pair starts with
+            # fresh local history whether or not its physical ``born`` flag is
+            # true on this frame.
+            return frame.active_pair_ids
+
+        previous = set(self._current_pair_ids)
+        entered = tuple(sorted(current - previous))
+        declared_births = tuple(
+            pair.pair_id for pair in frame.pairs if pair.lifecycle.born
+        )
+        if entered != declared_births:
+            raise CausalObservationError(
+                "mid-episode population entries must match declared pair births",
+                context={
+                    "entered_pair_ids": entered,
+                    "declared_birth_pair_ids": declared_births,
+                },
+            )
+        reappeared = tuple(sorted(current & self._retired_pair_ids))
+        if reappeared:
+            raise CausalObservationError(
+                "a retired pair ID cannot reappear without a new episode identity",
+                context={"reappeared_pair_ids": reappeared},
+            )
+        return entered
 
     def begin_frame(self, frame: PopulationFrame) -> CausalActorFrame:
         """Materialize every pre-action row from current trace and prior feedback."""
@@ -255,6 +296,16 @@ class CausalActorObservationAssembler:
                 "population frames must arrive without gaps or reordering",
                 context={"actual": frame.index, "expected": self._expected_frame_index},
             )
+
+        fresh_pair_ids = self._fresh_pair_ids(frame)
+        for pair_id in fresh_pair_ids:
+            try:
+                self.perception.initialize_pair_history(pair_id)
+            except (TypeError, ValueError) as error:
+                raise CausalObservationError(
+                    "pair birth could not create a fresh link history",
+                    context={"pair_id": pair_id},
+                ) from error
 
         local_rows: list[tuple[str, tuple[float, ...] | None]] = []
         for pair in frame.pairs:
@@ -308,6 +359,10 @@ class CausalActorObservationAssembler:
             raise CausalObservationError(
                 "causal actor rows lost population-frame identity alignment"
             )
+        previous = set(self._current_pair_ids) if self._has_population_frame else set()
+        self._retired_pair_ids.update(previous - set(frame.active_pair_ids))
+        self._current_pair_ids = frame.active_pair_ids
+        self._has_population_frame = True
         self._open_frame = frame
         self._recorded_pair_ids.clear()
         return actor_frame

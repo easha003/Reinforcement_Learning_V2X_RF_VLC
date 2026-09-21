@@ -423,6 +423,18 @@ retry count; DUP-n multiplies that packet-level RF risk by the selected VLC
 risk. Early RF success stops sampled retry evaluation without refunding any
 reservation. Mechanism outcomes, link diagnostics, and the RF-pool response
 remain in step information and are absent from both actor and critic tensors.
+Pair birth is now an explicit lifecycle boundary. Frame rows require the birth
+flag exactly at pair episode step zero, and after the first sampled frame the
+current stable-ID entrants must equal the declared births in both causal
+assembly and API binding. Every entrant receives a newly allocated empty link
+tracker; pre-existing state is rejected. Its first usable row therefore carries
+zero-padded unmeasured qualities and histories, `-1` ages and previous
+action/outcome, and zero consecutive misses. Missing causal tracks still emit
+no row. A physical birth leaves continuing-pair histories and the preceding
+frame's valid delayed population signal intact. The first sampled frame remains
+the documented exception: pairs already underway in the source trace are new
+to the rollout and begin with fresh local history without being relabelled as
+physical births.
 
 ### Objective
 
@@ -457,7 +469,7 @@ Advance to the next population frame
 - [x] Construct causal actor observations from trace state and past feedback only.
 - [x] Keep centralized critic information separate from actor observations.
 - [x] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
-- [ ] Handle pair birth without fabricated history.
+- [x] Handle pair birth without fabricated history.
 - [ ] Handle pair termination and trace truncation correctly for return estimation.
 - [ ] Seed every stochastic component.
 - [ ] Add invariant checks for finite values, valid probabilities, valid actions, and legal lifecycle transitions.
@@ -788,4 +800,5 @@ centralized tensor without altering the 37-column actor API. Pair-aligned
 packet outcomes now provide committed resource reward, realized binary miss
 cost, and selected-action conditional miss risk while retaining current RF/VLC
 truth only as simulator diagnostics. Implement the next Phase 5 task by
-handling pair birth without fabricated history.
+handling pair termination and trace truncation correctly for return
+estimation.

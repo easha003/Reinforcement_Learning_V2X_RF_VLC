@@ -154,12 +154,28 @@ class Perception:
         self._cells.clear()
         self._neighbours.clear()
 
+    def initialize_pair_history(self, pair_id: str) -> None:
+        """Create exactly one fresh link history for a pair entering the rollout.
+
+        The population environment calls this at a physical pair birth and for
+        every pair present on the first sampled frame after reset.  Refusing an
+        existing ID makes accidental history carry-over visible instead of
+        silently presenting a newborn agent with another episode's feedback.
+        """
+
+        if not isinstance(pair_id, str) or not pair_id.strip():
+            raise ValueError("pair_id must be a non-empty string")
+        if pair_id in self._links:
+            raise ValueError(f"pair {pair_id!r} already has link history")
+        self._links[pair_id] = LinkStateTracker(
+            history_packets=self.builder.schema.history_packets
+        )
+
     def _link_state(self, pair_id: str) -> LinkStateTracker:
         state = self._links.get(pair_id)
         if state is None:
-            state = self._links[pair_id] = LinkStateTracker(
-                history_packets=self.builder.schema.history_packets
-            )
+            self.initialize_pair_history(pair_id)
+            state = self._links[pair_id]
         return state
 
     def _sense(self, instant: PairInstant) -> None:
