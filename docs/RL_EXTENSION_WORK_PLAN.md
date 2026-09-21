@@ -325,7 +325,14 @@ response from frame ``t`` is promoted only when frame ``t+1`` begins. Reset is
 encoded as ``[0, 0]`` while a measured empty frame becomes ``[0, 1]``. The
 actor schema remains exactly the 35 local causal columns followed by delayed
 mean RF-attempt fraction and validity; current demand, CBR, collision risk, and
-action histograms are not appended.
+action histograms are not appended. The named load-regime suite now exercises
+the complete demand-to-feedback boundary at empty (zero demand), light load
+(40 of 400 attempt resources), exact saturation (400 of 400), and overload
+(800 of 400). It checks unclipped utilization, clipped CBR, contender and
+hidden-contender counts, analytical collision probability, the overload flag,
+and the next-frame actor suffix. In particular, overload remains explicit in
+the unclipped utilization even though both bounded CBR and a fully committed
+population's delayed mean-attempt fraction equal one.
 
 ### Objective
 
@@ -338,7 +345,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 - [x] Combine contention risk with policy-independent RF propagation state.
 - [x] Generate matched/counterfactual randomness where required for fair policy comparison.
 - [x] Expose only delayed or measured congestion information to the next actor observation.
-- [ ] Test empty, light-load, saturation, and overload conditions.
+- [x] Test empty, light-load, saturation, and overload conditions.
 - [ ] Test monotonicity: increasing offered RF load must not reduce collision risk under fixed channel conditions.
 - [ ] Cross-check limiting cases against analytical calculations or the existing fixed-point oracle.
 
@@ -701,6 +708,8 @@ identity-addressed outcome tape fixes four RF entries and one VLC entry before
 action choice, preserves the RF-n/DUP-n prefix rule, and is independent of
 population iteration order. A frame-ordered feedback state now appends only the
 one-frame-delayed mean RF-attempt fraction and validity flag to the 35-column
-local observation. Implement the next Phase 4 task by expanding the RF-pool
-validation suite across empty, light-load, saturation, and overload conditions,
-including the delayed feedback those regimes produce.
+local observation. A named four-regime suite now validates the complete path
+from current joint demand through RF-pool diagnostics to that delayed actor
+suffix. Implement the next Phase 4 task by testing that increasing offered RF
+load cannot reduce collision risk while channel and sensing conditions remain
+fixed.

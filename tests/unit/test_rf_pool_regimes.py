@@ -1,0 +1,153 @@
+"""Contract tests for the Phase 4 RF-pool load regimes."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+
+from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
+from hybrid_v2x_rl.config import load_headline_config
+from hybrid_v2x_rl.env.assembly import build_rf_channel
+from hybrid_v2x_rl.mean_field.congestion_feedback import (
+    ActorObservationSchema,
+    DelayedCongestionFeedback,
+)
+from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
+from hybrid_v2x_rl.observation.builder import ObservationBuilder
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TRACE_ID = "synthetic-regime-contract"
+
+
+@dataclass(frozen=True, slots=True)
+class LoadRegime:
+    """One reachable population demand and its physical-pool classification."""
+
+    name: str
+    active_pairs: int
+    offered_rf_attempts: int
+    expected_pool_utilization: float
+    expected_channel_busy_ratio: float
+    expected_oversubscribed: bool
+    expected_delayed_mean_fraction: float
+
+
+LOAD_REGIMES = (
+    LoadRegime("empty", 0, 0, 0.0, 0.0, False, 0.0),
+    # Forty attempts consume ten percent of the headline 400-attempt pool.
+    LoadRegime("light-load", 100, 40, 0.1, 0.1, False, 0.1),
+    LoadRegime("saturation", 100, 400, 1.0, 1.0, False, 1.0),
+    # Two hundred RF-4 actors offer twice the physical pool capacity.
+    LoadRegime("overload", 200, 800, 2.0, 1.0, True, 1.0),
+)
+
+
+def _model() -> RFPoolModel:
+    config = load_headline_config(PROJECT_ROOT)
+    return RFPoolModel(
+        parameters=build_rf_channel(
+            config,
+            band=SensitivityBand.NOMINAL,
+        ).collision,
+        sensitivity_band=SensitivityBand.NOMINAL,
+        attempt_airtime_s=config.rf.timing.airtime_s,
+    )
+
+
+def _demand(regime: LoadRegime) -> RFPoolDemand:
+    remaining = regime.offered_rf_attempts
+    reservations: list[tuple[str, int]] = []
+    for index in range(regime.active_pairs):
+        attempts = min(4, remaining)
+        reservations.append((f"pair-{index:03d}", attempts))
+        remaining -= attempts
+    assert remaining == 0, "the regime must be reachable with at most RF-4 per actor"
+    rows = tuple(reservations)
+    return RFPoolDemand(
+        trace_id=TRACE_ID,
+        frame_index=0,
+        time_s=0.0,
+        active_pairs=regime.active_pairs,
+        reserved_rf_attempts_by_pair=rows,
+        offered_rf_attempts=regime.offered_rf_attempts,
+        rf_using_pairs=sum(attempts > 0 for _, attempts in rows),
+    )
+
+
+def _feedback() -> DelayedCongestionFeedback:
+    config = load_headline_config(PROJECT_ROOT)
+    return DelayedCongestionFeedback.from_config(
+        config.environment.mean_field,
+        max_rf_attempts=config.environment.max_rf_attempts,
+    )
+
+
+def _actor_schema() -> ActorObservationSchema:
+    config = load_headline_config(PROJECT_ROOT)
+    return ActorObservationSchema(
+        local=ObservationBuilder.from_config(config.observation).schema
+    )
+
+
+@pytest.mark.parametrize("regime", LOAD_REGIMES, ids=lambda regime: regime.name)
+def test_named_load_regimes_have_auditable_pool_and_delayed_responses(
+    regime: LoadRegime,
+) -> None:
+    """Exercise each named boundary from demand through next-frame actor input."""
+
+    model = _model()
+    response = model.evaluate(_demand(regime), sensed_fraction=1.0)
+
+    assert response.candidate_resources == 400
+    assert response.pool_capacity_airtime_s == pytest.approx(0.2)
+    assert response.offered_airtime_s == pytest.approx(
+        regime.offered_rf_attempts * 0.0005
+    )
+    assert response.pool_utilization == pytest.approx(
+        regime.expected_pool_utilization
+    )
+    assert response.channel_busy_ratio == pytest.approx(
+        regime.expected_channel_busy_ratio
+    )
+    assert response.oversubscribed is regime.expected_oversubscribed
+
+    expected_contenders = max(0, regime.offered_rf_attempts - 1)
+    expected_hidden = expected_contenders * (1.0 - 0.85)
+    expected_collision = 1.0 - (1.0 - 1.0 / 400.0) ** expected_hidden
+    assert response.contending_attempts == expected_contenders
+    assert response.hidden_contenders == pytest.approx(expected_hidden)
+    assert response.per_attempt_collision_probability == pytest.approx(
+        expected_collision
+    )
+
+    feedback = _feedback()
+    schema = _actor_schema()
+    local = (0.0,) * schema.local.width
+    feedback.reset(TRACE_ID)
+    feedback.begin_frame(TRACE_ID, 0)
+    assert feedback.actor_observation(schema, local)[-2:] == (0.0, 0.0)
+    feedback.close_frame(response)
+
+    delayed = feedback.begin_frame(TRACE_ID, 1)
+    actor = feedback.actor_observation(schema, local)
+    assert delayed.source_frame_index == 0
+    assert delayed.mean_rf_attempt_fraction == pytest.approx(
+        regime.expected_delayed_mean_fraction
+    )
+    assert actor[-2:] == pytest.approx(
+        (regime.expected_delayed_mean_fraction, 1.0)
+    )
+
+
+def test_overload_remains_visible_when_cbr_and_actor_feedback_are_bounded() -> None:
+    """Unclipped utilization must retain overload after bounded signals hit one."""
+
+    overload = LOAD_REGIMES[-1]
+    response = _model().evaluate(_demand(overload))
+
+    assert response.pool_utilization == pytest.approx(2.0)
+    assert response.channel_busy_ratio == pytest.approx(1.0)
+    assert overload.expected_delayed_mean_fraction == pytest.approx(1.0)
+    assert response.oversubscribed
