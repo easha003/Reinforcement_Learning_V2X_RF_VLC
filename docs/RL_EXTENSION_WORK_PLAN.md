@@ -414,6 +414,15 @@ configured three-density one-hot and `log1p(N_t)`, and repeats that 41-column
 suffix beside each local row to form the contract's 78-column reward/cost
 critic input. Empty frames emit no critic rows or invented mean. The actor
 tensor stays 37 columns and shares no storage with the training-only tensor.
+The packet-outcome boundary now copies committed resource reward from the
+audited action ledger, evaluates the selected RF retry prefix and VLC leg on
+each identity-addressed matched tape, and emits immutable pair-aligned
+``float32`` reward, sampled binary miss-cost, and conditional miss-risk arrays.
+RF-n conditional risk is the current per-attempt risk raised to its reserved
+retry count; DUP-n multiplies that packet-level RF risk by the selected VLC
+risk. Early RF success stops sampled retry evaluation without refunding any
+reservation. Mechanism outcomes, link diagnostics, and the RF-pool response
+remain in step information and are absent from both actor and critic tensors.
 
 ### Objective
 
@@ -447,7 +456,7 @@ Advance to the next population frame
 - [x] Support variable numbers of active agents with masks and stable agent IDs.
 - [x] Construct causal actor observations from trace state and past feedback only.
 - [x] Keep centralized critic information separate from actor observations.
-- [ ] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
+- [x] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
 - [ ] Handle pair birth without fabricated history.
 - [ ] Handle pair termination and trace truncation correctly for return estimation.
 - [ ] Seed every stochastic component.
@@ -775,6 +784,8 @@ noisy delayed trace perception, retains only past action-dependent link
 feedback, appends the preceding frame's population signal, and represents a
 missing causal track without inventing a numeric observation. A separate
 training-only critic boundary now constructs and validates the 78-column
-centralized tensor without altering the 37-column actor API. Implement the
-next Phase 5 task by producing reward, sampled binary miss cost, and simulator
-conditional-risk diagnostics.
+centralized tensor without altering the 37-column actor API. Pair-aligned
+packet outcomes now provide committed resource reward, realized binary miss
+cost, and selected-action conditional miss risk while retaining current RF/VLC
+truth only as simulator diagnostics. Implement the next Phase 5 task by
+handling pair birth without fabricated history.
