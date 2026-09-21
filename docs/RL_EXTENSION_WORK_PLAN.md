@@ -332,7 +332,12 @@ the complete demand-to-feedback boundary at empty (zero demand), light load
 hidden-contender counts, analytical collision probability, the overload flag,
 and the next-frame actor suffix. In particular, overload remains explicit in
 the unclipped utilization even though both bounded CBR and a fully committed
-population's delayed mean-attempt fraction equal one.
+population's delayed mean-attempt fraction equal one. Monotonicity is now
+checked at every adjacent integer demand from zero through 800 attempts while
+holding 200 active pairs fixed. The sweep covers all three declared sensing
+bands at sensed fractions zero, one-half, and one. Collision risk never falls,
+is strictly increasing once a focal attempt has a contender, and continues to
+increase from saturation to overload even while clipped CBR remains one.
 
 ### Objective
 
@@ -346,7 +351,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 - [x] Generate matched/counterfactual randomness where required for fair policy comparison.
 - [x] Expose only delayed or measured congestion information to the next actor observation.
 - [x] Test empty, light-load, saturation, and overload conditions.
-- [ ] Test monotonicity: increasing offered RF load must not reduce collision risk under fixed channel conditions.
+- [x] Test monotonicity: increasing offered RF load must not reduce collision risk under fixed channel conditions.
 - [ ] Cross-check limiting cases against analytical calculations or the existing fixed-point oracle.
 
 ### Deliverables
@@ -710,6 +715,8 @@ population iteration order. A frame-ordered feedback state now appends only the
 one-frame-delayed mean RF-attempt fraction and validity flag to the 35-column
 local observation. A named four-regime suite now validates the complete path
 from current joint demand through RF-pool diagnostics to that delayed actor
-suffix. Implement the next Phase 4 task by testing that increasing offered RF
-load cannot reduce collision risk while channel and sensing conditions remain
-fixed.
+suffix. Adjacent-load sweeps now establish collision-risk monotonicity through
+twice the headline pool capacity under every declared sensing band and three
+fixed sensed-fraction conditions. Implement the final Phase 4 task by
+cross-checking limiting cases against independent analytical calculations or
+the existing fixed-point oracle.
