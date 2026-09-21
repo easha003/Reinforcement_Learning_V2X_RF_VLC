@@ -409,6 +409,21 @@ population.
   a new episode instance and fresh history. State is never carried across a
   gap.
 
+Return estimation uses two separate pair-aligned masks:
+
+```text
+value_bootstrap_mask = (~terminated & ~truncated) | bootstrap_valid
+gae_continuation_mask = ~(terminated | truncated)
+```
+
+Thus an internal truncation may use the value of its separately exposed
+`final_observation`, but recursive GAE never crosses the reset. Natural endings
+and truncations without a next physical trace observation bootstrap from zero.
+`final_observation` is an ID-keyed mapping that must cover exactly the rows
+where `bootstrap_valid` is true. The final packet itself remains eligible for
+learning when its causal actor row is usable. Pair-local history is released
+only after that packet's outcome feedback has been processed.
+
 No transition, normalization statistic, recurrent state, or delayed
 mean-field value crosses a trace split. Full trace IDs in train, validation,
 and test remain immutable and disjoint.

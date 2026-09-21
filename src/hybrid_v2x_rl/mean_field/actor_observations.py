@@ -53,6 +53,8 @@ class CausalPerception(Protocol):
 
     def initialize_pair_history(self, pair_id: str) -> None: ...
 
+    def release(self, pair_id: str) -> None: ...
+
     def observe(self, instant: PairInstant) -> tuple[float, ...] | None: ...
 
     def record_policy_feedback(
@@ -181,6 +183,7 @@ class CausalActorObservationAssembler:
     _recorded_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
     _current_pair_ids: tuple[str, ...] = field(default=(), init=False, repr=False)
     _retired_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _finalized_pair_ids: set[str] = field(default_factory=set, init=False, repr=False)
     _has_population_frame: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -240,6 +243,7 @@ class CausalActorObservationAssembler:
         self._recorded_pair_ids.clear()
         self._current_pair_ids = ()
         self._retired_pair_ids.clear()
+        self._finalized_pair_ids.clear()
         self._has_population_frame = False
 
     def _fresh_pair_ids(self, frame: PopulationFrame) -> tuple[str, ...]:
@@ -255,6 +259,12 @@ class CausalActorObservationAssembler:
             return frame.active_pair_ids
 
         previous = set(self._current_pair_ids)
+        remained_after_final = tuple(sorted(current & self._finalized_pair_ids))
+        if remained_after_final:
+            raise CausalObservationError(
+                "a finalized pair cannot remain active after its final packet",
+                context={"pair_ids": remained_after_final},
+            )
         entered = tuple(sorted(current - previous))
         declared_births = tuple(
             pair.pair_id for pair in frame.pairs if pair.lifecycle.born
@@ -446,6 +456,12 @@ class CausalActorObservationAssembler:
                 context={"actual": response_ids, "expected": frame.active_pair_ids},
             )
         self.congestion.close_frame(response)
+        finalized_pair_ids = tuple(
+            pair.pair_id for pair in frame.pairs if pair.lifecycle.final
+        )
+        for pair_id in finalized_pair_ids:
+            self.perception.release(pair_id)
+        self._finalized_pair_ids.update(finalized_pair_ids)
         self._expected_frame_index = frame.index + 1
         self._open_frame = None
         self._recorded_pair_ids.clear()

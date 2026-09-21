@@ -217,6 +217,8 @@ class FrameStepOutput:
     rewards: RewardArray
     terminated: DoneArray
     truncated: DoneArray
+    bootstrap_valid: DoneArray
+    learn_mask: DoneArray
     info: FrameInfo = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -229,6 +231,8 @@ class FrameStepOutput:
             ("rewards", self.rewards, np.dtype(np.float32)),
             ("terminated", self.terminated, np.dtype(np.bool_)),
             ("truncated", self.truncated, np.dtype(np.bool_)),
+            ("bootstrap_valid", self.bootstrap_valid, np.dtype(np.bool_)),
+            ("learn_mask", self.learn_mask, np.dtype(np.bool_)),
         ):
             if not isinstance(value, np.ndarray) or value.dtype != dtype:
                 raise FrameAPIError(f"{name} must be a {dtype.name} ndarray")
@@ -241,6 +245,8 @@ class FrameStepOutput:
             raise FrameAPIError("rewards must contain only finite values")
         if bool(np.any(self.terminated & self.truncated)):
             raise FrameAPIError("a transition cannot be terminated and truncated")
+        if bool(np.any(self.bootstrap_valid & ~self.truncated)):
+            raise FrameAPIError("only a truncated transition may bootstrap from final state")
         if not isinstance(self.info, Mapping):
             raise FrameAPIError("step info must be a mapping")
 
@@ -249,6 +255,61 @@ class FrameStepOutput:
         if supplied_ids is not None and supplied_ids != self.transition_pair_ids:
             raise FrameAPIError("info transition_pair_ids do not match step outputs")
         payload["transition_pair_ids"] = self.transition_pair_ids
+
+        expected_final_ids = tuple(
+            pair_id
+            for pair_id, is_valid in zip(
+                self.transition_pair_ids, self.bootstrap_valid, strict=True
+            )
+            if bool(is_valid)
+        )
+        final_observation = payload.get("final_observation", {})
+        if not isinstance(final_observation, Mapping):
+            raise FrameAPIError("info final_observation must be a pair-ID mapping")
+        supplied_final = dict(final_observation)
+        invalid_final_ids = tuple(
+            repr(pair_id)
+            for pair_id in supplied_final
+            if not isinstance(pair_id, str) or not pair_id.strip()
+        )
+        if invalid_final_ids:
+            raise FrameAPIError(
+                "info final_observation keys must be non-empty pair IDs",
+                context={"invalid_pair_ids": invalid_final_ids},
+            )
+        missing_final = tuple(
+            pair_id for pair_id in expected_final_ids if pair_id not in supplied_final
+        )
+        unexpected_final = tuple(sorted(set(supplied_final) - set(expected_final_ids)))
+        if missing_final or unexpected_final:
+            raise FrameAPIError(
+                "info final_observation must cover bootstrap-valid pairs exactly",
+                context={
+                    "missing_pair_ids": missing_final,
+                    "unexpected_pair_ids": unexpected_final,
+                },
+            )
+        if any(value is None for value in supplied_final.values()):
+            raise FrameAPIError("a final bootstrap observation cannot be None")
+
+        expected_value_bootstrap = (~self.terminated & ~self.truncated) | self.bootstrap_valid
+        expected_gae_continuation = ~(self.terminated | self.truncated)
+        for name, expected in (
+            ("bootstrap_valid", self.bootstrap_valid),
+            ("learn_mask", self.learn_mask),
+            ("value_bootstrap_mask", expected_value_bootstrap),
+            ("gae_continuation_mask", expected_gae_continuation),
+        ):
+            supplied = payload.get(name)
+            if supplied is None:
+                continue
+            if (
+                not isinstance(supplied, np.ndarray)
+                or supplied.dtype != np.dtype(np.bool_)
+                or supplied.shape != (population,)
+                or not np.array_equal(supplied, expected)
+            ):
+                raise FrameAPIError(f"info {name} does not match step outputs")
 
         object.__setattr__(
             self,
@@ -265,6 +326,25 @@ class FrameStepOutput:
             "truncated",
             cast(DoneArray, _freeze_array(self.truncated)),
         )
+        object.__setattr__(
+            self,
+            "bootstrap_valid",
+            cast(DoneArray, _freeze_array(self.bootstrap_valid)),
+        )
+        object.__setattr__(
+            self,
+            "learn_mask",
+            cast(DoneArray, _freeze_array(self.learn_mask)),
+        )
+        value_bootstrap_mask = (~self.terminated & ~self.truncated) | self.bootstrap_valid
+        value_bootstrap_mask.setflags(write=False)
+        gae_continuation_mask = ~(self.terminated | self.truncated)
+        gae_continuation_mask.setflags(write=False)
+        payload["bootstrap_valid"] = self.bootstrap_valid
+        payload["learn_mask"] = self.learn_mask
+        payload["value_bootstrap_mask"] = value_bootstrap_mask
+        payload["gae_continuation_mask"] = gae_continuation_mask
+        payload["final_observation"] = MappingProxyType(supplied_final)
         object.__setattr__(self, "info", MappingProxyType(payload))
 
     def as_tuple(self) -> StepReturn:

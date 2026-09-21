@@ -470,7 +470,7 @@ Advance to the next population frame
 - [x] Keep centralized critic information separate from actor observations.
 - [x] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
 - [x] Handle pair birth without fabricated history.
-- [ ] Handle pair termination and trace truncation correctly for return estimation.
+- [x] Handle pair termination and trace truncation correctly for return estimation.
 - [ ] Seed every stochastic component.
 - [ ] Add invariant checks for finite values, valid probabilities, valid actions, and legal lifecycle transitions.
 - [ ] Run long deterministic rollouts with random and scripted policies.
@@ -799,6 +799,9 @@ training-only critic boundary now constructs and validates the 78-column
 centralized tensor without altering the 37-column actor API. Pair-aligned
 packet outcomes now provide committed resource reward, realized binary miss
 cost, and selected-action conditional miss risk while retaining current RF/VLC
-truth only as simulator diagnostics. Implement the next Phase 5 task by
-handling pair termination and trace truncation correctly for return
-estimation.
+truth only as simulator diagnostics. Pair-aligned return boundaries now keep
+natural termination, internal truncation, and physical trace truncation
+distinct; require final observations exactly for valid internal bootstraps;
+stop recursive advantages at every reset; and release pair-local state only
+after the final packet outcome closes. Implement the next Phase 5 task by
+seeding every stochastic component.

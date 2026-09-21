@@ -164,13 +164,20 @@ def test_step_outputs_align_to_current_ids_while_next_population_may_change() ->
     rewards = np.array([0.5, -0.25], dtype=np.float32)
     terminated = np.array([True, False], dtype=np.bool_)
     truncated = np.array([False, True], dtype=np.bool_)
+    bootstrap_valid = np.array([False, True], dtype=np.bool_)
+    learn_mask = np.array([True, False], dtype=np.bool_)
     output = FrameStepOutput(
         next_observation=next_observation,
         transition_pair_ids=("pair-a", "pair-b"),
         rewards=rewards,
         terminated=terminated,
         truncated=truncated,
-        info={"diagnostic": "kept-out-of-observation"},
+        bootstrap_valid=bootstrap_valid,
+        learn_mask=learn_mask,
+        info={
+            "diagnostic": "kept-out-of-observation",
+            "final_observation": {"pair-b": ("next-trace-row",)},
+        },
     )
 
     step = output.as_tuple()
@@ -181,6 +188,17 @@ def test_step_outputs_align_to_current_ids_while_next_population_may_change() ->
     assert not output.rewards.flags.writeable
     assert not output.terminated.flags.writeable
     assert not output.truncated.flags.writeable
+    assert not output.bootstrap_valid.flags.writeable
+    assert not output.learn_mask.flags.writeable
+    assert output.info["final_observation"]["pair-b"] == ("next-trace-row",)
+    assert np.array_equal(
+        output.info["value_bootstrap_mask"],
+        np.array([False, True], dtype=np.bool_),
+    )
+    assert np.array_equal(
+        output.info["gae_continuation_mask"],
+        np.array([False, False], dtype=np.bool_),
+    )
 
     rewards[0] = 9.0
     assert output.rewards[0] == pytest.approx(0.5)
@@ -211,6 +229,25 @@ def test_step_outputs_align_to_current_ids_while_next_population_may_change() ->
             id="both-done",
         ),
         pytest.param(
+            {"bootstrap_valid": np.ones(2, dtype=np.bool_)},
+            id="bootstrap-without-truncation",
+        ),
+        pytest.param(
+            {
+                "truncated": np.array([False, True], dtype=np.bool_),
+                "bootstrap_valid": np.array([False, True], dtype=np.bool_),
+            },
+            id="missing-final-observation",
+        ),
+        pytest.param(
+            {"info": {"final_observation": {"pair-a": object()}}},
+            id="unexpected-final-observation",
+        ),
+        pytest.param(
+            {"info": {"learn_mask": np.zeros(2, dtype=np.bool_)}},
+            id="info-learn-mask-drift",
+        ),
+        pytest.param(
             {"info": {"transition_pair_ids": ("pair-x", "pair-y")}},
             id="info-id-drift",
         ),
@@ -225,6 +262,8 @@ def test_step_output_fails_closed_on_alignment_drift(
         "rewards": np.zeros(2, dtype=np.float32),
         "terminated": np.zeros(2, dtype=np.bool_),
         "truncated": np.zeros(2, dtype=np.bool_),
+        "bootstrap_valid": np.zeros(2, dtype=np.bool_),
+        "learn_mask": np.ones(2, dtype=np.bool_),
     }
     values.update(kwargs)
     with pytest.raises(FrameAPIError):
@@ -257,6 +296,8 @@ class _StructuralFrameEnvironment:
             rewards=np.zeros(1, dtype=np.float32),
             terminated=np.ones(1, dtype=np.bool_),
             truncated=np.zeros(1, dtype=np.bool_),
+            bootstrap_valid=np.zeros(1, dtype=np.bool_),
+            learn_mask=np.ones(1, dtype=np.bool_),
         ).as_tuple()
 
     def close(self) -> None:

@@ -53,6 +53,8 @@ For the frame in which actions are selected:
 | `rewards` | `float32`, `(N_t,)` | `info["transition_pair_ids"]` |
 | `terminated` | `bool`, `(N_t,)` | `info["transition_pair_ids"]` |
 | `truncated` | `bool`, `(N_t,)` | `info["transition_pair_ids"]` |
+| `bootstrap_valid` | `bool`, `(N_t,)` | `info["transition_pair_ids"]` |
+| `learn_mask` | `bool`, `(N_t,)` | `info["transition_pair_ids"]` |
 | next actor observations | `float32`, `(N_(t+1), 37)` | next `pair_ids` |
 | next action masks | `bool`, `(N_(t+1), 9)` | next `pair_ids` |
 
@@ -146,6 +148,22 @@ ages and previous action/outcome are `-1`, and consecutive misses are zero.
 Missing causal endpoint tracks still produce `values=None`. A mid-rollout birth
 does not reset continuing-pair history or the valid delayed population signal.
 
+## Return-estimation boundary
+
+`FrameReturnBoundary` aligns lifecycle copied into the action ledger with the
+exact causal actor frame. It emits immutable `terminated`, `truncated`,
+`bootstrap_valid`, and `learn_mask` vectors, plus two deliberately different
+derived masks. `value_bootstrap_mask` is true for normal continuations and for
+internal truncations that have a next physical trace observation.
+`gae_continuation_mask` is false for every termination or truncation, so an
+advantage recursion cannot cross a reset.
+
+For each true `bootstrap_valid` row, `info["final_observation"]` must contain
+exactly one value keyed by stable pair ID. No final observation is accepted for
+a natural end or a trace-end truncation. Final pair-local perception state is
+released only after feedback for the final packet has been recorded and the
+frame closes; the same finalized ID cannot remain active on the next frame.
+
 ## Centralized critic boundary
 
 `CentralizedCriticBuilder` creates a separate training-only
@@ -214,6 +232,8 @@ API objects fail closed on:
 - an active actor with no legal action;
 - reward/lifecycle arrays not aligned to `transition_pair_ids`;
 - a transition marked both terminated and truncated; and
+- a bootstrap-valid row that is not truncated;
+- missing or unexpected final observations at a truncation boundary;
 - disagreement between explicit IDs and IDs supplied through `info`.
 
 Arrays are copied into contiguous read-only storage, and step `info` is exposed

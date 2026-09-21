@@ -74,6 +74,7 @@ def _frame(
     *,
     born_pair_ids: frozenset[str] | None = None,
     episode_steps: dict[str, int] | None = None,
+    lifecycles: dict[str, PairLifecycle] | None = None,
     extra_vehicle_ids: tuple[str, ...] = (),
 ) -> PopulationFrame:
     time_s = 0.1 * index
@@ -83,6 +84,7 @@ def _frame(
         else born_pair_ids
     )
     steps = dict(episode_steps or {})
+    lifecycle_by_pair = dict(lifecycles or {})
     endpoint_ids = tuple(
         sorted(
             {
@@ -100,7 +102,10 @@ def _frame(
             episode_step=steps.get(pair_id, 0 if pair_id in births else index),
             transmitter=vehicles[ENDPOINTS[pair_id][0]],
             receiver=vehicles[ENDPOINTS[pair_id][1]],
-            lifecycle=PairLifecycle(born=pair_id in births),
+            lifecycle=lifecycle_by_pair.get(
+                pair_id,
+                PairLifecycle(born=pair_id in births),
+            ),
         )
         for pair_id in pair_ids
     )
@@ -139,11 +144,13 @@ class _PerceptionDouble:
         self.previous: dict[str, tuple[PolicyAction, bool, dict[Link, float]]] = {}
         self.instants = []
         self.initialized: set[str] = set()
+        self.released: list[str] = []
 
     def reset(self) -> None:
         self.previous.clear()
         self.instants.clear()
         self.initialized.clear()
+        self.released.clear()
 
     def initialize_pair_history(self, pair_id: str) -> None:
         if pair_id in self.initialized or pair_id in self.previous:
@@ -169,6 +176,11 @@ class _PerceptionDouble:
             if Link.RF in reports:
                 local[columns.index("rf_quality")] = reports[Link.RF]
         return tuple(local)
+
+    def release(self, pair_id: str) -> None:
+        self.released.append(pair_id)
+        self.previous.pop(pair_id, None)
+        self.initialized.discard(pair_id)
 
     def record_policy_feedback(
         self,
@@ -482,6 +494,75 @@ def test_reset_clears_both_pair_history_and_population_history() -> None:
     previous_index = fresh.schema.columns.index("previous_action")
     assert fresh.rows[0].values[previous_index] == -1.0
     assert fresh.signal.vector == (0.0, 0.0)
+
+
+def test_final_pair_history_is_released_only_after_its_feedback_is_processed() -> None:
+    assembler, perception = _assembler()
+    assembler.reset(TRACE_ID, start_frame_index=1)
+    frame = _frame(
+        1,
+        ("pair-a",),
+        episode_steps={"pair-a": 1},
+        lifecycles={
+            "pair-a": PairLifecycle(
+                born=False,
+                terminated=True,
+                end_reason="route_diverged",
+            )
+        },
+    )
+    assembler.begin_frame(frame)
+
+    assembler.record_feedback(
+        "pair-a",
+        action=PolicyAction.RF_1,
+        at_s=frame.time_s + 0.001,
+        delivered=False,
+        measurements={Link.RF: 0.4},
+    )
+    assert "pair-a" in perception.previous
+    assert perception.released == []
+
+    assembler.close_frame(_response(frame, (1,)))
+
+    assert perception.released == ["pair-a"]
+    assert "pair-a" not in perception.previous
+    assert "pair-a" not in perception.initialized
+
+
+def test_finalized_pair_cannot_remain_active_on_the_next_frame() -> None:
+    assembler, perception = _assembler()
+    assembler.reset(TRACE_ID, start_frame_index=1)
+    final = _frame(
+        1,
+        ("pair-a",),
+        episode_steps={"pair-a": 1},
+        lifecycles={
+            "pair-a": PairLifecycle(
+                born=False,
+                truncated=True,
+                bootstrap_valid=True,
+                end_reason="max_duration",
+            )
+        },
+    )
+    assembler.begin_frame(final)
+    assembler.record_feedback(
+        "pair-a",
+        action=PolicyAction.VLC,
+        at_s=final.time_s + 0.001,
+        delivered=True,
+    )
+    assembler.close_frame(_response(final, (0,)))
+
+    illegal = _frame(
+        2,
+        ("pair-a",),
+        episode_steps={"pair-a": 2},
+    )
+    with pytest.raises(CausalObservationError, match="finalized pair"):
+        assembler.begin_frame(illegal)
+    assert perception.instants[-1].index == 1
 
 
 def test_real_perception_records_the_exact_nine_action_index() -> None:
