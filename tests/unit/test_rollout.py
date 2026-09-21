@@ -23,6 +23,7 @@ from hybrid_v2x_rl.env.packet import DUP, RF_ONLY, VLC_ONLY, PacketError, Packet
 from hybrid_v2x_rl.env.rollout import (
     CONTENTION_RADIUS_M,
     PacketContext,
+    RolloutSeedError,
     always,
     best_action,
 )
@@ -126,6 +127,83 @@ def test_a_tape_carries_one_draw_set_per_granted_attempt(rollout):
     tape = rollout._tape("trace-a", "tx>rx", 0, (1.0,) * rollout.lifecycle.timing.rf_attempts)
     assert len(tape.rf_attempts) == rollout.lifecycle.timing.rf_attempts
     assert len(tape.rf_fading_power_gains) == rollout.lifecycle.timing.rf_attempts
+
+
+def test_correlated_channel_state_is_independent_of_pair_iteration_order(config):
+    tx, rx, fleet = platoon()
+
+    def run(order):
+        rollout = build_rollout(config, buildings=(), root_seed=73)
+        realized = {}
+        for pair_id in order:
+            outcome, _, _ = rollout.evaluate_instant(
+                trace_id="trace-a",
+                pair_id=pair_id,
+                index=0,
+                density=20.0,
+                time_s=0.0,
+                transmitter=tx,
+                receiver=rx,
+                neighbours=fleet,
+                index_of_frame=SpatialIndex.build(fleet),
+                choose=always(RF_ONLY),
+            )
+            realized[pair_id] = (
+                rollout.shadowing._normalized[pair_id],
+                tuple(rollout.fading._gains[pair_id]),
+                outcome.delivered,
+                outcome.rf_failure_probability,
+            )
+        return realized
+
+    assert run(("pair-a", "pair-b")) == run(("pair-b", "pair-a"))
+
+
+def test_trace_identity_changes_correlated_channel_streams(config):
+    tx, rx, fleet = platoon()
+
+    def initial_state(trace_id):
+        rollout = build_rollout(config, buildings=(), root_seed=73)
+        rollout.evaluate_instant(
+            trace_id=trace_id,
+            pair_id="pair-a",
+            index=0,
+            density=20.0,
+            time_s=0.0,
+            transmitter=tx,
+            receiver=rx,
+            neighbours=fleet,
+            index_of_frame=SpatialIndex.build(fleet),
+            choose=always(RF_ONLY),
+        )
+        return (
+            rollout.shadowing._normalized["pair-a"],
+            tuple(rollout.fading._gains["pair-a"]),
+        )
+
+    assert initial_state("trace-a") != initial_state("trace-b")
+
+
+def test_trace_cannot_change_until_all_correlated_state_is_released(config):
+    tx, rx, fleet = platoon()
+    rollout = build_rollout(config, buildings=(), root_seed=73)
+    common = {
+        "index": 0,
+        "density": 20.0,
+        "time_s": 0.0,
+        "transmitter": tx,
+        "receiver": rx,
+        "neighbours": fleet,
+        "index_of_frame": SpatialIndex.build(fleet),
+        "choose": always(RF_ONLY),
+    }
+    rollout.evaluate_instant(trace_id="trace-a", pair_id="pair-a", **common)
+
+    with pytest.raises(RolloutSeedError, match="correlated pair state is live"):
+        rollout.evaluate_instant(trace_id="trace-b", pair_id="pair-b", **common)
+
+    rollout.release("pair-a")
+    rollout.evaluate_instant(trace_id="trace-b", pair_id="pair-b", **common)
 
 
 # -- the correlated per-pair states -------------------------------------------

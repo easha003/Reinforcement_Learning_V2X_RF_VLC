@@ -442,6 +442,21 @@ feedback noise use separate named streams. Counterfactual outcomes may be
 logged for oracle analysis but may never enter actor or critic inputs used by a
 deployable policy.
 
+At environment reset, an explicit `seed` overrides `training.root_seed` for
+that reset; `seed = None` uses the configured root. Reset metadata records the
+seed schema, configured root, active root, trace ID, and runtime stochastic
+component list. All roots are unsigned 64-bit integers. Stateful shadowing and
+fading own persistent generators keyed by trace and pair-episode identity, so
+their temporal/spatial correlation is preserved without making initial state
+depend on pair iteration order. The generator and correlated state are
+released together at the pair boundary. A live channel process may not cross
+to another trace.
+
+Mobility is not redrawn at environment reset: it is fixed in the selected
+immutable trace artifact and its generation seed remains in that artifact's
+manifest. Policy-action sampling and analysis bootstrap resampling use their
+own named roots outside the environment and are never advanced by `step()`.
+
 ## 12. Required invariants for implementation phases
 
 Phases 2–5 must enforce and test all of the following before training:

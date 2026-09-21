@@ -52,7 +52,9 @@ Fourier pair of an exponential power delay profile in frequency.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TypeAlias
 
 import numpy as np
 
@@ -72,6 +74,8 @@ LOS_RICIAN_K_DB = 9.0
 #: Clarke's autocorrelation first crosses zero at ``f_d tau = 0.3830``; the
 #: conventional coherence time is the 0.5-correlation point, ``0.423 / f_d``.
 COHERENCE_TIME_COEFFICIENT = 0.423
+
+GeneratorFactory: TypeAlias = Callable[[str], np.random.Generator]
 
 
 class FadingError(HybridV2XError):
@@ -218,14 +222,25 @@ class FadingProcess:
     marginals, which is what the retransmission model reads.
     """
 
-    rng: np.random.Generator
+    rng: np.random.Generator | None
     carrier_hz: float
     subchannel_separations_hz: tuple[float, ...]
     rms_delay_spread_s: float = URBAN_RMS_DELAY_SPREAD_S
+    generator_factory: GeneratorFactory | None = None
     _gains: dict[str, np.ndarray] = field(default_factory=dict)
+    _generators: dict[str, np.random.Generator] = field(
+        default_factory=dict,
+        repr=False,
+    )
     _cholesky: np.ndarray | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if (self.rng is None) == (self.generator_factory is None):
+            raise FadingError(
+                "fading requires exactly one shared RNG or keyed generator factory"
+            )
+        if self.rng is not None and not isinstance(self.rng, np.random.Generator):
+            raise FadingError("fading rng must be a NumPy Generator")
         if not self.subchannel_separations_hz:
             raise FadingError("at least one subchannel is required")
         offsets = np.asarray(self.subchannel_separations_hz, dtype=float)
@@ -245,12 +260,30 @@ class FadingProcess:
     def subchannel_count(self) -> int:
         return len(self.subchannel_separations_hz)
 
-    def _draw_innovation(self) -> np.ndarray:
+    def _generator(self, key: str) -> np.random.Generator:
+        """Return one persistent stream per link when a factory is configured."""
+
+        if self.rng is not None:
+            return self.rng
+        generator = self._generators.get(key)
+        if generator is None:
+            factory = self.generator_factory
+            if factory is None:  # pragma: no cover - rejected in __post_init__.
+                raise FadingError("fading generator factory is unavailable")
+            generator = factory(key)
+            if not isinstance(generator, np.random.Generator):
+                raise FadingError(
+                    "fading generator factory must return a NumPy Generator"
+                )
+            self._generators[key] = generator
+        return generator
+
+    def _draw_innovation(self, generator: np.random.Generator) -> np.ndarray:
         """Unit-power complex Gaussian, correlated across subchannels."""
 
         white = (
-            self.rng.standard_normal(self.subchannel_count)
-            + 1j * self.rng.standard_normal(self.subchannel_count)
+            generator.standard_normal(self.subchannel_count)
+            + 1j * generator.standard_normal(self.subchannel_count)
         ) / math.sqrt(2.0)
         cholesky = self._cholesky
         if cholesky is None:  # pragma: no cover - initialized in __post_init__
@@ -276,14 +309,17 @@ class FadingProcess:
         """
 
         doppler = doppler_spread_hz(tx_speed_mps, rx_speed_mps, self.carrier_hz)
+        generator = self._generator(key)
         previous = self._gains.get(key)
         if previous is None:
-            diffuse = self._draw_innovation()
+            diffuse = self._draw_innovation(generator)
         else:
             rho = temporal_correlation(elapsed_s, doppler)
             # J0 is oscillatory and goes negative; an AR(1) needs |rho| <= 1 and
             # a non-negative innovation variance, which holds for any J0 value.
-            diffuse = rho * previous + math.sqrt(max(0.0, 1.0 - rho * rho)) * self._draw_innovation()
+            diffuse = rho * previous + math.sqrt(
+                max(0.0, 1.0 - rho * rho)
+            ) * self._draw_innovation(generator)
         self._gains[key] = diffuse
 
         k = rician_k_linear(state)
@@ -294,6 +330,7 @@ class FadingProcess:
 
     def forget(self, key: str) -> None:
         self._gains.pop(key, None)
+        self._generators.pop(key, None)
 
     def live_links(self) -> int:
         return len(self._gains)
@@ -303,6 +340,7 @@ __all__ = [
     "COHERENCE_TIME_COEFFICIENT",
     "FadingError",
     "FadingProcess",
+    "GeneratorFactory",
     "LOS_RICIAN_K_DB",
     "SPEED_OF_LIGHT_MPS",
     "URBAN_RMS_DELAY_SPREAD_S",

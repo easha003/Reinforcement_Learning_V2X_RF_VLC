@@ -32,6 +32,7 @@ from hybrid_v2x_rl.channels.rf.pathloss_37885 import blockage_mean_db, blockage_
 from hybrid_v2x_rl.channels.rf.shadowing import ShadowingProcess
 from hybrid_v2x_rl.channels.vlc.model import VLCChannelRequest, VLCPacketRandomness
 from hybrid_v2x_rl.core.enums import RFPropagationState
+from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.geometry import OrientedRectangle, Segment
 from hybrid_v2x_rl.core.link_endpoints import (
     DEFAULT_RF_ANTENNA_HEIGHT_M,
@@ -39,7 +40,7 @@ from hybrid_v2x_rl.core.link_endpoints import (
     rf_link_path,
 )
 from hybrid_v2x_rl.core.pair_geometry import DEFAULT_FOV_HALF_ANGLE_RAD, pair_geometry
-from hybrid_v2x_rl.core.randomness import derive_seed
+from hybrid_v2x_rl.core.randomness import derive_seed, make_generator
 from hybrid_v2x_rl.env.episodes import VehiclePose
 from hybrid_v2x_rl.env.packet import Action, PacketLifecycle, PacketOutcome, PacketTape
 from hybrid_v2x_rl.geometry.rf_visibility import classify_path
@@ -77,6 +78,10 @@ DEFAULT_SENSED_FRACTION = 1.0
 #: independence for free and keeps the blockage residual persistent in travelled
 #: distance, which it should be: the van in front stays in front.
 _BLOCKAGE_KEY_SUFFIX = "|blockage"
+
+
+class RolloutSeedError(HybridV2XError):
+    """A rollout seed or trace transition would contaminate channel streams."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,14 +126,64 @@ class Rollout:
     shadowing: ShadowingProcess = field(init=False)
     fading: FadingProcess = field(init=False)
     _last_time_s: dict[str, float] = field(default_factory=dict, repr=False)
+    _active_trace_id: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.shadowing = ShadowingProcess(rng=np.random.default_rng(self.root_seed))
+        try:
+            make_generator(self.root_seed, "rollout.root-validation")
+        except (TypeError, ValueError) as error:
+            raise RolloutSeedError("root_seed is not a valid unsigned seed") from error
+        self.shadowing = ShadowingProcess(
+            rng=None,
+            generator_factory=lambda key: self._channel_generator("shadowing", key),
+        )
         self.fading = FadingProcess(
-            rng=np.random.default_rng(self.root_seed + 1),
+            rng=None,
             carrier_hz=self.lifecycle.rf.carrier_hz,
             subchannel_separations_hz=self._hop_offsets_hz(),
+            generator_factory=lambda key: self._channel_generator("fading", key),
         )
+
+    def _channel_generator(
+        self,
+        stream_name: str,
+        pair_state_key: str,
+    ) -> np.random.Generator:
+        """Derive one persistent channel stream from trace and pair identity."""
+
+        trace_id = self._active_trace_id
+        if trace_id is None:
+            raise RolloutSeedError(
+                "a trace must be bound before channel randomness is requested"
+            )
+        return make_generator(
+            self.root_seed,
+            stream_name,
+            trace_id=trace_id,
+            episode_id=pair_state_key,
+        )
+
+    def _bind_trace(self, trace_id: str) -> None:
+        """Bind stateful channels to one trace until every live pair is released."""
+
+        if not isinstance(trace_id, str) or not trace_id.strip():
+            raise RolloutSeedError("trace_id must be a non-empty string")
+        if self._active_trace_id in (None, trace_id):
+            self._active_trace_id = trace_id
+            return
+        if (
+            self.shadowing.live_links() > 0
+            or self.fading.live_links() > 0
+            or self._last_time_s
+        ):
+            raise RolloutSeedError(
+                "cannot change traces while correlated pair state is live",
+                context={
+                    "active_trace_id": self._active_trace_id,
+                    "requested_trace_id": trace_id,
+                },
+            )
+        self._active_trace_id = trace_id
 
     def _hop_offsets_hz(self) -> tuple[float, ...]:
         """Where in the band each granted attempt lands.
@@ -189,6 +244,8 @@ class Rollout:
         counterfactual: bool = False,
     ) -> tuple[PacketOutcome, PacketContext, dict[str, PacketOutcome] | None]:
         """One packet at one pair pose."""
+
+        self._bind_trace(trace_id)
 
         geometry = pair_geometry(
             transmitter, receiver, fov_half_angle_rad=self.fov_half_angle_rad
@@ -342,6 +399,7 @@ __all__ = [
     "ActionChooser",
     "PacketContext",
     "Rollout",
+    "RolloutSeedError",
     "always",
     "best_action",
 ]

@@ -455,8 +455,10 @@ class TrainingConfig(ConfigModel):
     """Primal-dual PPO and reproducibility settings."""
 
     algorithm: Literal["primal_dual_ppo"]
-    root_seed: Annotated[int, Field(ge=0)]
-    policy_seeds: tuple[Annotated[int, Field(ge=0)], ...] = Field(min_length=1)
+    root_seed: Annotated[int, Field(ge=0, lt=2**64)]
+    policy_seeds: tuple[Annotated[int, Field(ge=0, lt=2**64)], ...] = Field(
+        min_length=1
+    )
     total_transitions_per_seed: PositiveInt
     architecture: NetworkArchitectureConfig
     rollout_packets: PositiveInt

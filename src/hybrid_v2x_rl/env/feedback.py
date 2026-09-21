@@ -32,10 +32,8 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-
 from hybrid_v2x_rl.core.enums import Link
-from hybrid_v2x_rl.core.randomness import derive_seed
+from hybrid_v2x_rl.core.randomness import make_generator
 from hybrid_v2x_rl.env.packet import PacketOutcome
 
 #: Standard deviation of the reported quality's estimation error, in dB.
@@ -81,6 +79,30 @@ def _report(value_db: float, span: tuple[float, float], noise_db: float) -> floa
     return float(min(1.0, max(0.0, (quantized - low) / (high - low))))
 
 
+def reported_quality(
+    value_db: float,
+    *,
+    link: Link,
+    root_seed: int,
+    trace_id: str,
+    pair_id: str,
+    packet_index: int,
+) -> float:
+    """Return one reproducible noisy report addressed by packet and medium."""
+
+    if not isinstance(link, Link):
+        raise TypeError("link must be a Link")
+    generator = make_generator(
+        root_seed,
+        f"feedback|{link.name}",
+        trace_id=trace_id,
+        episode_id=pair_id,
+        packet_index=packet_index,
+    )
+    noise = float(generator.normal(0.0, MEASUREMENT_ERROR_DB))
+    return _report(value_db, _SPANS[link], noise)
+
+
 def measurements(
     outcome: PacketOutcome,
     *,
@@ -106,17 +128,14 @@ def measurements(
             continue
         # Seeded per packet *and* per leg, so the two legs' errors are
         # independent while staying identical across the actions that use them.
-        generator = np.random.default_rng(
-            derive_seed(
-                root_seed,
-                f"feedback|{link.name}",
-                trace_id=trace_id,
-                episode_id=pair_id,
-                packet_index=packet_index,
-            )
+        readings[link] = reported_quality(
+            value,
+            link=link,
+            root_seed=root_seed,
+            trace_id=trace_id,
+            pair_id=pair_id,
+            packet_index=packet_index,
         )
-        noise = float(generator.normal(0.0, MEASUREMENT_ERROR_DB))
-        readings[link] = _report(value, _SPANS[link], noise)
     return readings
 
 
@@ -126,4 +145,5 @@ __all__ = [
     "RF_QUALITY_SPAN_DB",
     "VLC_QUALITY_SPAN_DB",
     "measurements",
+    "reported_quality",
 ]

@@ -132,6 +132,27 @@ def test_unknown_configuration_key_is_rejected(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "override_text",
+    (
+        f"training:\n  root_seed: {2**64}\n",
+        f"training:\n  policy_seeds: [1001, {2**64}]\n",
+    ),
+)
+def test_training_seeds_must_fit_the_unsigned_64_bit_contract(
+    tmp_path: Path,
+    override_text: str,
+) -> None:
+    override = tmp_path / "invalid-seed.yaml"
+    override.write_text(override_text, encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="less than"):
+        load_config(
+            (*headline_config_layers(PROJECT_ROOT), override),
+            project_root=PROJECT_ROOT,
+        )
+
+
 def test_secondary_ultra_reliability_layers_form_valid_configuration() -> None:
     config_root = PROJECT_ROOT / "configs"
     layers = list(headline_config_layers(PROJECT_ROOT))

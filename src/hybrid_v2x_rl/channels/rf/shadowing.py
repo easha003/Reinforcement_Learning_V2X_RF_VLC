@@ -33,7 +33,9 @@ and must be checked before Gate 2.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TypeAlias
 
 import numpy as np
 
@@ -48,6 +50,8 @@ NLOS_DECORRELATION_M = 13.0
 #: Beyond this many decorrelation lengths the AR coefficient underflows to
 #: zero in double precision anyway, so the sample is drawn fresh.
 _INDEPENDENCE_THRESHOLD = 40.0
+
+GeneratorFactory: TypeAlias = Callable[[str], np.random.Generator]
 
 
 class ShadowingError(HybridV2XError):
@@ -93,8 +97,39 @@ class ShadowingProcess:
     needs -- and this module never has to know about vehicles.
     """
 
-    rng: np.random.Generator
+    rng: np.random.Generator | None
+    generator_factory: GeneratorFactory | None = None
     _normalized: dict[str, float] = field(default_factory=dict)
+    _generators: dict[str, np.random.Generator] = field(
+        default_factory=dict,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if (self.rng is None) == (self.generator_factory is None):
+            raise ShadowingError(
+                "shadowing requires exactly one shared RNG or keyed generator factory"
+            )
+        if self.rng is not None and not isinstance(self.rng, np.random.Generator):
+            raise ShadowingError("shadowing rng must be a NumPy Generator")
+
+    def _generator(self, key: str) -> np.random.Generator:
+        """Return one persistent stream per link when a factory is configured."""
+
+        if self.rng is not None:
+            return self.rng
+        generator = self._generators.get(key)
+        if generator is None:
+            factory = self.generator_factory
+            if factory is None:  # pragma: no cover - rejected in __post_init__.
+                raise ShadowingError("shadowing generator factory is unavailable")
+            generator = factory(key)
+            if not isinstance(generator, np.random.Generator):
+                raise ShadowingError(
+                    "shadowing generator factory must return a NumPy Generator"
+                )
+            self._generators[key] = generator
+        return generator
 
     def advance(self, key: str, displacement_m: float, state: RFPropagationState) -> float:
         """Move ``key``'s shadowing forward and return its unit-variance value.
@@ -105,13 +140,14 @@ class ShadowingProcess:
         briefly and wrongly optimistic.
         """
 
+        generator = self._generator(key)
         previous = self._normalized.get(key)
         if previous is None:
-            value = float(self.rng.standard_normal())
+            value = float(generator.standard_normal())
         else:
             rho = correlation(displacement_m, decorrelation_distance_m(state))
             value = rho * previous + math.sqrt(1.0 - rho * rho) * float(
-                self.rng.standard_normal()
+                generator.standard_normal()
             )
         self._normalized[key] = value
         return value
@@ -125,6 +161,7 @@ class ShadowingProcess:
         """
 
         self._normalized.pop(key, None)
+        self._generators.pop(key, None)
 
     def live_links(self) -> int:
         return len(self._normalized)
@@ -152,6 +189,7 @@ __all__ = [
     "NLOS_DECORRELATION_M",
     "ShadowingError",
     "ShadowingProcess",
+    "GeneratorFactory",
     "correlation",
     "decorrelation_distance_m",
     "shadowing_db",

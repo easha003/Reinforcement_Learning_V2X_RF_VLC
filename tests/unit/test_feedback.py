@@ -29,6 +29,7 @@ from hybrid_v2x_rl.env.feedback import (
     REPORTING_STEP_DB,
     RF_QUALITY_SPAN_DB,
     measurements,
+    reported_quality,
 )
 from hybrid_v2x_rl.env.packet import DUP, RF_ONLY, VLC_ONLY, PacketLifecycle, PacketOutcome, Timing
 
@@ -194,6 +195,16 @@ def test_different_packets_draw_different_errors() -> None:
         for i in range(40)
     }
     assert len(reports) > 1
+
+
+def test_public_single_link_report_uses_the_same_identity_address() -> None:
+    packet = outcome(rf_quality_db=20.0)
+
+    assert reported_quality(
+        20.0,
+        link=Link.RF,
+        **IDENTITY,
+    ) == measurements(packet, **IDENTITY)[Link.RF]
 
 
 def test_the_two_legs_draw_independent_errors() -> None:

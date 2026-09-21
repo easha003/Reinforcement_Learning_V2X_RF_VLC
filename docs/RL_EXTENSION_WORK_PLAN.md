@@ -471,7 +471,7 @@ Advance to the next population frame
 - [x] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
 - [x] Handle pair birth without fabricated history.
 - [x] Handle pair termination and trace truncation correctly for return estimation.
-- [ ] Seed every stochastic component.
+- [x] Seed every stochastic component.
 - [ ] Add invariant checks for finite values, valid probabilities, valid actions, and legal lifecycle transitions.
 - [ ] Run long deterministic rollouts with random and scripted policies.
 
@@ -803,5 +803,10 @@ truth only as simulator diagnostics. Pair-aligned return boundaries now keep
 natural termination, internal truncation, and physical trace truncation
 distinct; require final observations exactly for valid internal bootstraps;
 stop recursive advantages at every reset; and release pair-local state only
-after the final packet outcome closes. Implement the next Phase 5 task by
-seeding every stochastic component.
+after the final packet outcome closes. A single reset-seed authority now binds
+causal sensing, matched packet tapes, noisy feedback, correlated shadowing, and
+correlated fading to the root seed plus stable trace/pair/packet/mechanism
+identity. Pair ordering, population size, source ordering, and NumPy global RNG
+state cannot shift those draws. Implement the next Phase 5 task by adding
+invariant checks for finite values, valid probabilities, valid actions, and
+legal lifecycle transitions.

@@ -502,25 +502,29 @@ def run_equilibrium(
         carry across traces, and ``pair_id`` is only unique within one -- which
         is why clusters are keyed by ``trace_id|pair_id``. Iterating every
         source through a single rollout would let one trace's fading state
-        decide another trace's outcomes. The seed is tied to the trace index so
-        a rerun of one replicate reproduces exactly, and the usage fraction is
-        shared across all of them because the pool is.
+        decide another trace's outcomes. Every trace receives the same
+        experiment root; each component derives its stream from that root and
+        the immutable trace ID. Source reordering therefore cannot change a
+        trace's draws, and the usage fraction remains shared across the pool.
         """
 
-        for index, source in enumerate(sources):
-            seed = root_seed + index
+        for source in sources:
             # A mixed reservation is expressed as the population's mean
             # committed airtime, which is what the contention model reads.
             share = (usage if mean_attempts is None
                      else mean_attempts / config.service.rf_attempts_per_packet)
             rollout = build_rollout(
-                config, buildings=(), root_seed=seed, band=band,
+                config, buildings=(), root_seed=root_seed, band=band,
                 rf_usage_fraction=share,
             )
             # Perception only where a belief will read it: it maintains noisy
             # tracks for every vehicle in frame and costs more than the channel
             # evaluation it accompanies.
-            seeing = build_perception(config, root_seed=seed) if belief else None
+            seeing = (
+                build_perception(config, root_seed=root_seed)
+                if belief
+                else None
+            )
             for instant in iter_pair_instants(
                 source, generation_period_s=generation_period_s,
                 max_packets=max_packets, warmup_s=warmup_s,

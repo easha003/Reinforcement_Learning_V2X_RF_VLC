@@ -43,6 +43,13 @@ The API preserves:
 - distinct termination and truncation signals; and
 - a `close()` lifecycle hook.
 
+`reset(seed=None)` resolves to the configured `training.root_seed`; an explicit
+seed replaces it for that reset. The returned info records the seed schema,
+configured and active roots, whether the override was explicit, the trace ID,
+and all runtime stochastic components. The same trace, configuration, and
+active seed reproduce causal sensing, matched outcome tapes, link feedback,
+shadowing, and fading exactly.
+
 ## Vector semantics
 
 For the frame in which actions are selected:
