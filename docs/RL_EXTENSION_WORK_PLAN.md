@@ -390,7 +390,13 @@ owns its possibly different IDs. Versioned schema construction derives and
 asserts the configured 37 actor columns and nine actions. Validated arrays and
 step metadata are immutable, empty frames retain zero-row contract shapes, and
 the exact deviation from scalar Gymnasium is recorded in
-``docs/PHASE5_FRAME_API.md``.
+``docs/PHASE5_FRAME_API.md``. A chronological variable-population binding now
+uses Phase 2 active pair IDs as the sole row-order authority, requires exactly
+one keyed actor row per active ID, and replicates the Phase 3 profile mask for
+each row. It reports entered, continuing, and exited stable IDs across changing
+populations, processes empty frames without dropping time, rejects frame gaps
+or trace drift, and forbids a retired ID from reappearing without a new episode
+identity. Reset clears identity history at the sampled-episode boundary.
 
 ### Objective
 
@@ -421,7 +427,7 @@ Advance to the next population frame
 ### Tasks
 
 - [x] Implement a Gymnasium-compatible API or document any intentional deviation.
-- [ ] Support variable numbers of active agents with masks and stable agent IDs.
+- [x] Support variable numbers of active agents with masks and stable agent IDs.
 - [ ] Construct causal actor observations from trace state and past feedback only.
 - [ ] Keep centralized critic information separate from actor observations.
 - [ ] Produce reward, sampled binary miss cost, and simulator conditional-risk diagnostics.
@@ -745,6 +751,7 @@ fixed sensed-fraction conditions. Independent stable closed-form calculations
 now verify the RF-pool response at its zero-load, focal-only, saturation, and
 overload limits, completing Phase 4. Phase 5 now has a typed, validated
 Gymnasium-shaped multi-agent frame API and an explicit record of its necessary
-scalar-API deviation. Implement the next Phase 5 task by supporting changing
-active populations across frames while preserving stable pair IDs and aligned
-masks.
+scalar-API deviation. A chronological population binding now preserves stable
+pair identity and mask alignment through entries, continuations, exits, and
+empty frames. Implement the next Phase 5 task by constructing causal actor
+observations from trace state and past feedback only.

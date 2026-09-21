@@ -64,6 +64,31 @@ An empty population is represented by arrays of shape `(0, 37)` and `(0, 9)`,
 not by `None` or by dropping the frame. It still advances the environment and
 can produce delayed zero-load congestion for the following frame.
 
+## Variable-population binding
+
+`VariablePopulationBinding` joins three existing authorities:
+
+- Phase 2 `PopulationFrame.active_pair_ids` defines active episode identities
+  and their canonical row order;
+- keyed actor rows supply one 37-column vector for each exact active ID; and
+- the Phase 3 `ActionMask` supplies the profile-wide nine-action hardware
+  mask, repeated once per active pair.
+
+The caller's mapping insertion order has no meaning. Missing, unexpected, or
+blank actor-row keys fail before an observation is emitted. The binding reports
+three disjoint stable-ID sets with each observation: entered, continuing, and
+exited pairs. On the first frame after reset, every active ID is entered.
+
+Frames must belong to the reset trace and arrive at consecutive indices,
+including empty frames. Once an ID exits, it is retired for that sampled
+episode and cannot reappear after a gap; the source must assign a new episode
+identity. Reset clears both current and retired identity state, so a later
+sampled segment starts cleanly even when it belongs to the same source trace.
+
+The current profile has one hardware configuration for every pair, so the mask
+is deliberately population-wide. Agent-specific hardware and per-agent action
+spaces remain deferred scope.
+
 ## Observation boundary
 
 `FrameObservation` contains only:
