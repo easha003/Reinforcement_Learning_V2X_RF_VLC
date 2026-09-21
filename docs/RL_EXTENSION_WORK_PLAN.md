@@ -377,6 +377,21 @@ The RF-pool response is numerically stable, physically interpretable, monotonic 
 
 ## Phase 5 — Mean-field environment
 
+Status (2026-09-21): **in progress**. The environment boundary is frozen as a
+Gymnasium-shaped multi-agent frame protocol without inheriting from
+``gymnasium.Env``. It preserves ``reset(seed, options)``, the five-part step
+result, separate termination/truncation semantics, and ``close()``, while
+intentionally returning pair-aligned vectors because the active population can
+change between decision frames. ``FrameObservation`` contains only canonical
+stable IDs, the ``float32`` decentralized actor matrix, and boolean action
+masks. ``FrameStepOutput`` separately aligns rewards and lifecycle flags to the
+actors that just acted through ``transition_pair_ids``; the next observation
+owns its possibly different IDs. Versioned schema construction derives and
+asserts the configured 37 actor columns and nine actions. Validated arrays and
+step metadata are immutable, empty frames retain zero-row contract shapes, and
+the exact deviation from scalar Gymnasium is recorded in
+``docs/PHASE5_FRAME_API.md``.
+
 ### Objective
 
 Combine trace replay, local observations, joint-action coupling, channel outcomes, rewards, costs, and lifecycle handling into one testable environment.
@@ -405,7 +420,7 @@ Advance to the next population frame
 
 ### Tasks
 
-- [ ] Implement a Gymnasium-compatible API or document any intentional deviation.
+- [x] Implement a Gymnasium-compatible API or document any intentional deviation.
 - [ ] Support variable numbers of active agents with masks and stable agent IDs.
 - [ ] Construct causal actor observations from trace state and past feedback only.
 - [ ] Keep centralized critic information separate from actor observations.
@@ -728,6 +743,8 @@ suffix. Adjacent-load sweeps now establish collision-risk monotonicity through
 twice the headline pool capacity under every declared sensing band and three
 fixed sensed-fraction conditions. Independent stable closed-form calculations
 now verify the RF-pool response at its zero-load, focal-only, saturation, and
-overload limits, completing Phase 4. Begin Phase 5 by implementing a
-Gymnasium-compatible environment API or documenting the intentional deviation
-required by the variable-population multi-agent frame contract.
+overload limits, completing Phase 4. Phase 5 now has a typed, validated
+Gymnasium-shaped multi-agent frame API and an explicit record of its necessary
+scalar-API deviation. Implement the next Phase 5 task by supporting changing
+active populations across frames while preserving stable pair IDs and aligned
+masks.
