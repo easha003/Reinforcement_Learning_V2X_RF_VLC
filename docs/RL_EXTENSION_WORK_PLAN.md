@@ -318,7 +318,14 @@ mechanism, and attempt index. Every scalar draw has an independent namespace,
 so population iteration and future mechanism additions cannot shift existing
 draws. RF-n and DUP-n select the same immutable RF prefix, with DUP-n and VLC
 sharing the packet's one optical entry; action selection never generates or
-advances randomness.
+advances randomness. Actor observations now append the two-column mean-field
+signal through a frame-ordered state machine. Frame ``t`` observations freeze
+the previously queued signal before any current action, and the audited pool
+response from frame ``t`` is promoted only when frame ``t+1`` begins. Reset is
+encoded as ``[0, 0]`` while a measured empty frame becomes ``[0, 1]``. The
+actor schema remains exactly the 35 local causal columns followed by delayed
+mean RF-attempt fraction and validity; current demand, CBR, collision risk, and
+action histograms are not appended.
 
 ### Objective
 
@@ -330,7 +337,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 - [x] Map offered load to pool utilization, CBR, and collision probability using the validated RF model.
 - [x] Combine contention risk with policy-independent RF propagation state.
 - [x] Generate matched/counterfactual randomness where required for fair policy comparison.
-- [ ] Expose only delayed or measured congestion information to the next actor observation.
+- [x] Expose only delayed or measured congestion information to the next actor observation.
 - [ ] Test empty, light-load, saturation, and overload conditions.
 - [ ] Test monotonicity: increasing offered RF load must not reduce collision risk under fixed channel conditions.
 - [ ] Cross-check limiting cases against analytical calculations or the existing fixed-point oracle.
@@ -692,6 +699,8 @@ with a deterministic, policy-independent propagation/decoding result. The
 combined risk preserves separate mechanism diagnostics. Its versioned,
 identity-addressed outcome tape fixes four RF entries and one VLC entry before
 action choice, preserves the RF-n/DUP-n prefix rule, and is independent of
-population iteration order. Implement the next Phase 4 task by exposing only
-one-frame-delayed or explicitly measured RF congestion information to the next
-actor observation, without leaking current joint actions or hidden pool state.
+population iteration order. A frame-ordered feedback state now appends only the
+one-frame-delayed mean RF-attempt fraction and validity flag to the 35-column
+local observation. Implement the next Phase 4 task by expanding the RF-pool
+validation suite across empty, light-load, saturation, and overload conditions,
+including the delayed feedback those regimes produce.
