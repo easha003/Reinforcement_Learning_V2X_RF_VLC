@@ -311,7 +311,14 @@ only geometry, blockage, shadowing, and fading inputs. The per-attempt risk
 composition adds the current pool collision probability and population-mean
 half-duplex exposure afterward, while retaining collision, half-duplex,
 decoding, access, and total failure probabilities as separate diagnostics. It
-does not sample an outcome or consume a random tape.
+does not sample an outcome or consume a random tape. The versioned matched
+outcome-tape boundary now generates exactly four RF entries and one VLC entry
+from root seed, trace ID, stable pair-episode ID, packet index, physical link,
+mechanism, and attempt index. Every scalar draw has an independent namespace,
+so population iteration and future mechanism additions cannot shift existing
+draws. RF-n and DUP-n select the same immutable RF prefix, with DUP-n and VLC
+sharing the packet's one optical entry; action selection never generates or
+advances randomness.
 
 ### Objective
 
@@ -322,7 +329,7 @@ Make RF reliability depend on the joint actions selected in the current frame.
 - [x] Recompute offered RF load after all population actions are known.
 - [x] Map offered load to pool utilization, CBR, and collision probability using the validated RF model.
 - [x] Combine contention risk with policy-independent RF propagation state.
-- [ ] Generate matched/counterfactual randomness where required for fair policy comparison.
+- [x] Generate matched/counterfactual randomness where required for fair policy comparison.
 - [ ] Expose only delayed or measured congestion information to the next actor observation.
 - [ ] Test empty, light-load, saturation, and overload conditions.
 - [ ] Test monotonicity: increasing offered RF load must not reduce collision risk under fixed channel conditions.
@@ -682,8 +689,9 @@ These are future extensions, not prerequisites for demonstrating the first popul
 Phases 2 and 3 are complete. Phase 4 now maps complete current-frame joint
 actions to RF-pool load and combines the resulting per-attempt contention risk
 with a deterministic, policy-independent propagation/decoding result. The
-combined risk preserves separate mechanism diagnostics and deliberately has no
-sampled success or failure. Implement the next Phase 4 task by generating
-identity-stable matched/counterfactual randomness, preserving the four-attempt
-prefix rule across RF-n and DUP-n actions without making draws depend on
-population iteration order.
+combined risk preserves separate mechanism diagnostics. Its versioned,
+identity-addressed outcome tape fixes four RF entries and one VLC entry before
+action choice, preserves the RF-n/DUP-n prefix rule, and is independent of
+population iteration order. Implement the next Phase 4 task by exposing only
+one-frame-delayed or explicitly measured RF congestion information to the next
+actor observation, without leaking current joint actions or hidden pool state.
