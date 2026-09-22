@@ -5,11 +5,11 @@ reader, causal observation boundary, action masks, joint-action accounting,
 shared RF pool, matched packet tapes, physical channels, packet outcomes, and
 pair lifecycle masks so long runs can fail fast before PPO is introduced.
 
-Unusable causal rows never reach a policy.  ``FrameObservation`` still needs a
-finite rectangular array for contract validation, so those rows receive an
-internal all-zero sentinel while :class:`MaskedActionSpace` independently
-forces the configured fallback action and the return boundary marks them as
-non-learning rows.
+Unusable causal rows never reach a policy.  The train-only normalizer produces
+the finite rectangular actor API, holds statistics frozen across the complete
+joint decision, verifies fallback actions, and only then updates once from the
+valid raw rows.  The return boundary independently marks unavailable rows as
+non-learning transitions.
 """
 
 from __future__ import annotations
@@ -37,12 +37,8 @@ from hybrid_v2x_rl.env.assembly import build_rollout
 from hybrid_v2x_rl.env.episodes import VehiclePose
 from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
-from hybrid_v2x_rl.mean_field.actor_observations import CausalActorFrame
-from hybrid_v2x_rl.mean_field.environment_api import (
-    FrameAPISchema,
-    FrameObservation,
-)
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, PopulationFrameReader
+from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizer
 from hybrid_v2x_rl.mean_field.packet_outcomes import assemble_frame_outcomes
 from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
 from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
@@ -103,6 +99,7 @@ class DeterministicRolloutReport:
     vlc_activations: int
     max_population: int
     max_pool_utilization: float
+    normalization_training_rows: int
     fingerprint: str
 
     def __post_init__(self) -> None:
@@ -123,6 +120,7 @@ class DeterministicRolloutReport:
             "reserved_rf_attempts",
             "vlc_activations",
             "max_population",
+            "normalization_training_rows",
         )
         if any(
             not isinstance(getattr(self, name), int)
@@ -150,6 +148,10 @@ class DeterministicRolloutReport:
         if self.usable_transitions + self.fallback_transitions != self.transitions:
             raise DeterministicRolloutError(
                 "usable and fallback counts must partition all transitions"
+            )
+        if self.normalization_training_rows != self.usable_transitions:
+            raise DeterministicRolloutError(
+                "normalization must update from every and only usable transition"
             )
 
     def as_dict(self) -> dict[str, object]:
@@ -206,39 +208,11 @@ def _select_proposal(
     return fixed
 
 
-def _frame_observation(
-    actor_frame: CausalActorFrame,
-    *,
-    schema: FrameAPISchema,
-    action_space: MaskedActionSpace,
-) -> FrameObservation:
-    # Attribute access remains explicit here so this helper cannot accidentally
-    # become a second observation builder; its sole purpose is API validation.
-    rows = actor_frame.rows
-    pair_ids = actor_frame.pair_ids
-    actor = np.zeros((len(rows), schema.actor_width), dtype=np.float32)
-    for row_index, row in enumerate(rows):
-        if row.values is not None:
-            actor[row_index] = np.asarray(row.values, dtype=np.float32)
-    mask_row = np.asarray(action_space.mask.values, dtype=np.bool_)
-    masks = np.tile(mask_row, (len(rows), 1))
-    return FrameObservation(
-        trace_id=actor_frame.trace_id,
-        frame_index=actor_frame.frame_index,
-        time_s=actor_frame.time_s,
-        pair_ids=pair_ids,
-        actor_observations=actor,
-        action_masks=masks,
-    )
-
-
 def _fingerprint_update(digest: _Digest, payload: object) -> None:
     def numpy_scalar(value: object) -> object:
         if isinstance(value, np.generic):
             return value.item()
-        raise TypeError(
-            f"fingerprint payload contains unsupported {type(value).__name__}"
-        )
+        raise TypeError(f"fingerprint payload contains unsupported {type(value).__name__}")
 
     encoded = json.dumps(
         payload,
@@ -304,7 +278,7 @@ def run_deterministic_rollout(
         config.rf,
         config.vlc,
     )
-    api_schema = FrameAPISchema.from_config(config)
+    normalizer = ObservationNormalizer.from_config(config)
     resource_map = ActionResourceMap.from_config(config.environment, config.cost)
 
     digest = hashlib.sha256()
@@ -330,11 +304,8 @@ def run_deterministic_rollout(
 
     for frame in reader.iter_frames(max_frames=max_frames):
         actor_frame = actor_assembler.begin_frame(frame)
-        observation = _frame_observation(
-            actor_frame,
-            schema=api_schema,
-            action_space=action_space,
-        )
+        normalized_frame = normalizer.begin_frame(frame, actor_frame)
+        observation = normalized_frame.observation
         proposals: list[PolicyAction] = []
         actions_by_pair: dict[str, PolicyAction] = {}
         for pair, actor_row in zip(frame.pairs, actor_frame.rows, strict=True):
@@ -356,7 +327,7 @@ def run_deterministic_rollout(
             actions_by_pair[pair.pair_id] = selected
 
         action_array = np.asarray(proposals, dtype=np.int64)
-        api_schema.validate_actions(observation, action_array)
+        normalizer.complete_frame(normalized_frame, action_array)
         ledger = FrameActionLedger.from_frame(
             frame,
             actions_by_pair,
@@ -472,8 +443,10 @@ def run_deterministic_rollout(
                 "time_s": frame.time_s,
                 "pair_ids": frame.active_pair_ids,
                 "actor_rows": [
-                    None if row.values is None else list(row.values) for row in actor_frame.rows
+                    (observation.actor_observations[index].tolist() if actor_row.usable else None)
+                    for index, actor_row in enumerate(actor_frame.rows)
                 ],
+                "normalization_count_before": list(normalized_frame.statistics_count_before),
                 "actions": [action.label for action in proposals],
                 "pool": {
                     "offered_rf_attempts": demand.offered_rf_attempts,
@@ -492,6 +465,8 @@ def run_deterministic_rollout(
             },
         )
 
+    normalization_state = dict(normalizer.state_dict())
+    _fingerprint_update(digest, {"normalization_state": normalization_state})
     source_exhausted = frames == reader.decision_frame_count
     return DeterministicRolloutReport(
         trace_id=source.trace_id,
@@ -517,6 +492,7 @@ def run_deterministic_rollout(
         vlc_activations=vlc_activations,
         max_population=max_population,
         max_pool_utilization=max_pool_utilization,
+        normalization_training_rows=normalizer.training_rows,
         fingerprint=digest.hexdigest(),
     )
 

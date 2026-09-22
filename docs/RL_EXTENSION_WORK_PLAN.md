@@ -377,7 +377,7 @@ The RF-pool response is numerically stable, physically interpretable, monotonic 
 
 ## Phase 5 — Mean-field environment
 
-Status (2026-09-21): **task checklist complete; one deliverable remains**. The
+Status (2026-09-21): **complete**. The
 environment boundary is frozen as a Gymnasium-shaped multi-agent frame protocol
 without inheriting from ``gymnasium.Env``. It preserves ``reset(seed,
 options)``, the five-part step result, separate termination/truncation
@@ -444,8 +444,18 @@ selected-action outcomes, feedback, and return boundaries. On the real
 report and fingerprint exactly. The four passes exercised 75,240 transitions
 without an invariant failure. Results and limitations are recorded in
 ``docs/PHASE5_DETERMINISTIC_ROLLOUTS.md``. The train-only observation-
-normalization workflow listed under deliverables is still outstanding, so this
-phase is not yet declared fully complete.
+normalization workflow now freezes Welford count, mean, and second central
+moment for every complete decision frame, transforms valid rows before action
+selection, and batch-updates once only after the joint action validates. Four
+encoded columns pass through unchanged; finite missing sentinels and padded
+history values remain training samples in every other column. Unavailable rows
+are excluded and must choose the configured fallback. Unfrozen validation/test
+input is rejected, frozen evaluation cannot update state, and versioned
+checkpoint restoration fails closed on schema or configuration drift. The
+real 100-frame replay incorporated exactly its 18,669 learning-usable rows per
+policy and reproduced normalized actor rows plus final checkpoint state on the
+second pass. ``docs/PHASE5_OBSERVATION_NORMALIZATION.md`` records the workflow
+and mechanical leakage checks.
 
 ### Objective
 
@@ -456,9 +466,13 @@ Combine trace replay, local observations, joint-action coupling, channel outcome
 ```text
 Load all active pairs
         ↓
-Construct causal local observations
+Construct causal raw observations
+        ↓
+Transform with frozen training statistics
         ↓
 Shared policy selects all actions
+        ↓
+Batch-update training statistics once
         ↓
 Aggregate RF attempts
         ↓
@@ -488,10 +502,10 @@ Advance to the next population frame
 
 ### Deliverables
 
-- Vectorized population environment
-- Environment checker and invariant suite
-- Deterministic rollout script
-- Observation-normalization workflow fitted on training data only
+- [x] Vectorized population environment
+- [x] Environment checker and invariant suite
+- [x] Deterministic rollout script
+- [x] Observation-normalization workflow fitted on training data only
 
 ### Completion gate
 
@@ -821,8 +835,8 @@ identity. Pair ordering, population size, source ordering, and NumPy global RNG
 state cannot shift those draws. Runtime invariant boundaries now reject
 non-finite targets, invalid probabilities, malformed or masked actions, and
 illegal cross-frame lifecycle transitions before they enter a rollout buffer.
-The Phase 5 task checklist and long-rollout completion gate are complete. Before
-beginning Phase 6, implement the remaining Phase 5 deliverable: a checkpointable
-running-standardization workflow that updates from the training split only,
-freezes for validation/test, preserves excluded categorical/sentinel columns,
-and is mechanically tested against split leakage.
+Phase 5 is complete: its task checklist, deliverables, invariant suite,
+normalization leakage checks, checkpoint-state round trip, and long-rollout
+completion gate all pass. Begin Phase 6 by implementing every required baseline
+through the same normalized environment, action accounting, RF-pool, matched
+randomness, outcome, and lifecycle path.

@@ -126,6 +126,7 @@ def test_random_rollout_is_bit_replayable_and_seed_addressed(config, source) -> 
     assert first.transitions == 10
     assert first.usable_transitions + first.fallback_transitions == first.transitions
     assert first.usable_transitions > 0
+    assert first.normalization_training_rows == first.usable_transitions
     assert first.internal_truncations == 1
     assert first.natural_terminations == 1
     assert first.trace_end_truncations == 1

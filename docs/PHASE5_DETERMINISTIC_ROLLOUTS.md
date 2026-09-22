@@ -11,15 +11,17 @@ second simulator and not yet the final training environment.
 For every global decision frame it executes this order:
 
 1. stream the immutable population frame and lifecycle metadata;
-2. freeze causal actor observations from current trace state and past feedback;
-3. select a complete masked joint action;
-4. audit per-pair and population resource accounting;
-5. calculate shared RF-pool demand and collision risk;
-6. advance policy-independent RF/VLC physical state once per pair;
-7. apply identity-addressed matched random tapes to selected actions;
-8. assemble reward, sampled miss cost, and conditional miss risk;
-9. validate termination, truncation, bootstrap, and learning masks;
-10. record bounded action-dependent feedback, close the frame, and release
+2. freeze causal raw observations from current trace state and past feedback;
+3. normalize every valid row with the pre-frame training-state snapshot;
+4. select and validate a complete masked joint action;
+5. batch-update Welford state once from the valid training rows;
+6. audit per-pair and population resource accounting;
+7. calculate shared RF-pool demand and collision risk;
+8. advance policy-independent RF/VLC physical state once per pair;
+9. apply identity-addressed matched random tapes to selected actions;
+10. assemble reward, sampled miss cost, and conditional miss risk;
+11. validate termination, truncation, bootstrap, and learning masks;
+12. record bounded action-dependent feedback, close the frame, and release
     final pair state.
 
 The physical path uses the same empty building set as the inherited synthetic
@@ -36,10 +38,11 @@ validation task.
 
 Policy randomness is separate from environment randomness. Unavailable causal
 observations are never shown to a policy: the configured `DUP-4` fallback is
-applied, and the transition's learning mask is false. A rectangular
-`FrameObservation` uses an internal finite zero sentinel only to exercise API
-shape/action validation for those rows; that sentinel is not policy input or
-training data.
+applied, and the transition's learning mask is false. The normalizer uses an
+internal finite zero placeholder only to preserve the rectangular
+`FrameObservation`; that placeholder is not policy input, does not update
+statistics, and is not training data. Every valid row is normalized before
+action selection with statistics frozen at the start of its frame.
 
 An internal max-duration truncation receives an immutable bootstrap-observation
 reference so exact final-observation coverage is checked. This harness does not
@@ -62,9 +65,10 @@ The default policy seed is `7001`; the environment seed defaults to the frozen
 headline configuration. The script runs each requested policy twice unless
 `--no-replay-check` is supplied. It compares the complete immutable report,
 including a SHA-256 digest streamed from actor rows, actions, shared-pool state,
-outcomes, and lifecycle masks. `--frames` is a diagnostic processing cutoff and
-does not manufacture truncation flags for pairs still active at the cutoff.
-Use `--frames 0` to replay the complete trace.
+outcomes, lifecycle masks, pre-frame normalization counts, and the final
+normalization checkpoint state. `--frames` is a diagnostic processing cutoff
+and does not manufacture truncation flags for pairs still active at the
+cutoff. Use `--frames 0` to replay the complete trace.
 
 The generated JSON report is reproducible evidence under `artifacts/logs/` and
 is intentionally ignored by Git.
@@ -82,6 +86,7 @@ the four passes.
 | Pair transitions | 18,810 | 18,810 |
 | Learning-usable transitions | 18,669 | 18,669 |
 | Missing-observation fallbacks | 141 | 141 |
+| Rows incorporated into normalization | 18,669 | 18,669 |
 | Pair births | 283 | 283 |
 | Natural terminations | 60 | 60 |
 | Sampled misses | 1,385 | 1,415 |
@@ -90,7 +95,7 @@ the four passes.
 | Maximum active population | 232 | 232 |
 | Maximum RF-pool utilization | 1.410 | 1.715 |
 | Replay verified | yes | yes |
-| SHA-256 fingerprint | `5435a14a94df9eec84820d77a0060a22264e005f71e7bc811693e4432b8f1ee8` | `481ab31ed03a75f16867e843c089b883821170ba1d29ed0eabf3fb57b715ca5d` |
+| SHA-256 fingerprint | `d8967d35cd6e55614c9785a3f5332653b769657150242e2878c0637481fe10f1` | `faa2512c18d82ce2594e3bf1d46d75aa9c8f94c48c778c31c7443a00b8572d5d` |
 
 No future-leakage boundary, invalid/masked action, non-finite value, invalid
 probability, stable-identity alignment, feedback timing, accounting,
@@ -105,6 +110,7 @@ checks:
 
 - exact report equality under identical environment and policy seeds;
 - fingerprint separation when the random-policy seed changes;
+- one normalization update for every and only learning-usable transition;
 - full-trace natural, internal-truncation, and trace-end lifecycle accounting;
 - cutoff semantics without fabricated truncations;
 - random, cycle, and fixed-action policy-name validation.
@@ -114,11 +120,13 @@ action-independent channel evaluation shares one correlated-state advance with
 the legacy action evaluator, which continues to use its complete hopped fading
 tape.
 
-## Remaining Phase 5 deliverable
+The dedicated normalization suite additionally verifies frame-frozen Welford
+updates, encoded-column pass-through, sentinel/history-padding inclusion,
+checkpoint round-trip, and immutable validation/test state. See
+`PHASE5_OBSERVATION_NORMALIZATION.md`.
 
-This validation completes the final item in the Phase 5 task checklist and its
-long-rollout completion gate. The separate work-plan deliverable
-"Observation-normalization workflow fitted on training data only" is not
-implemented by this harness. Phase 5 should not be declared fully complete
-until that stateful, checkpointable, split-isolated workflow and its leakage
-tests exist.
+## Phase 5 completion
+
+The long-rollout completion gate and the stateful, checkpointable,
+split-isolated normalization deliverable have both passed. Phase 5 is complete;
+the next work-plan gate is the Phase 6 baseline and oracle study.
