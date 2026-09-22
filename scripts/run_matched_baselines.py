@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from hybrid_v2x_rl.config.loader import load_headline_config
+from hybrid_v2x_rl.mean_field.baseline_ordering import verify_baseline_ordering
 from hybrid_v2x_rl.mean_field.baselines import (
     BASELINE_ALWAYS_RF,
     BASELINE_ALWAYS_VLC,
@@ -60,6 +61,14 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=project_root / "artifacts/evaluations/phase6_matched_baselines.json",
     )
+    parser.add_argument(
+        "--ordering-out",
+        type=Path,
+        help=(
+            "also verify guaranteed fixed-baseline ordering and write its JSON; "
+            "requires VLC, RF-1..4, and duplicate-all policies"
+        ),
+    )
     return parser
 
 
@@ -109,7 +118,20 @@ def main() -> int:
             f"tape={comparison.matched_tape_fingerprint}"
         )
     print(f"wrote {output}")
-    return 0
+    if args.ordering_out is None:
+        return 0
+
+    ordering_output = args.ordering_out.expanduser()
+    if not ordering_output.is_absolute():
+        ordering_output = project_root / ordering_output
+    ordering = verify_baseline_ordering(config, campaign)
+    ordering.write_json(ordering_output)
+    print(
+        f"ordering: passed={ordering.passed} checks={len(ordering.checks)} "
+        f"failed={len(ordering.failed_checks)}"
+    )
+    print(f"wrote {ordering_output}")
+    return 0 if ordering.passed else 1
 
 
 if __name__ == "__main__":
