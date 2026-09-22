@@ -20,6 +20,7 @@ from hybrid_v2x_rl.mean_field.baselines import (
     SupervisedOpticalRiskEstimator,
     baseline_policy,
 )
+from hybrid_v2x_rl.mean_field.density_metrics import build_density_metrics_report
 from hybrid_v2x_rl.mean_field.frames import TraceCatalog
 from hybrid_v2x_rl.mean_field.matched_campaign import run_matched_policy_campaign
 
@@ -69,6 +70,23 @@ def _parser() -> argparse.ArgumentParser:
             "requires VLC, RF-1..4, and duplicate-all policies"
         ),
     )
+    parser.add_argument(
+        "--density-out",
+        type=Path,
+        help="also write per-density reliability and resource metrics",
+    )
+    parser.add_argument(
+        "--density-split",
+        choices=("train", "validation", "test"),
+        default="test",
+        help="split summarized by --density-out (default: test)",
+    )
+    parser.add_argument(
+        "--bootstrap-replicates",
+        type=int,
+        help="override the configured trajectory-cluster bootstrap count",
+    )
+    parser.add_argument("--bootstrap-seed", type=int, default=0)
     return parser
 
 
@@ -118,20 +136,39 @@ def main() -> int:
             f"tape={comparison.matched_tape_fingerprint}"
         )
     print(f"wrote {output}")
-    if args.ordering_out is None:
-        return 0
+    exit_code = 0
+    if args.ordering_out is not None:
+        ordering_output = args.ordering_out.expanduser()
+        if not ordering_output.is_absolute():
+            ordering_output = project_root / ordering_output
+        ordering = verify_baseline_ordering(config, campaign)
+        ordering.write_json(ordering_output)
+        print(
+            f"ordering: passed={ordering.passed} checks={len(ordering.checks)} "
+            f"failed={len(ordering.failed_checks)}"
+        )
+        print(f"wrote {ordering_output}")
+        if not ordering.passed:
+            exit_code = 1
 
-    ordering_output = args.ordering_out.expanduser()
-    if not ordering_output.is_absolute():
-        ordering_output = project_root / ordering_output
-    ordering = verify_baseline_ordering(config, campaign)
-    ordering.write_json(ordering_output)
-    print(
-        f"ordering: passed={ordering.passed} checks={len(ordering.checks)} "
-        f"failed={len(ordering.failed_checks)}"
-    )
-    print(f"wrote {ordering_output}")
-    return 0 if ordering.passed else 1
+    if args.density_out is not None:
+        density_output = args.density_out.expanduser()
+        if not density_output.is_absolute():
+            density_output = project_root / density_output
+        density_report = build_density_metrics_report(
+            config,
+            campaign,
+            split=args.density_split,
+            bootstrap_replicates=args.bootstrap_replicates,
+            bootstrap_seed=args.bootstrap_seed,
+        )
+        density_report.write_json(density_output)
+        print(
+            f"density metrics: densities={len(density_report.densities)} "
+            f"evaluation_ready={density_report.evaluation_ready}"
+        )
+        print(f"wrote {density_output}")
+    return exit_code
 
 
 if __name__ == "__main__":

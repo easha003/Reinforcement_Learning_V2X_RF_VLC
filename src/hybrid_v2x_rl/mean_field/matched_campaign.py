@@ -94,6 +94,27 @@ class MatchedTraceComparison:
                 "policies did not replay the same trace structure",
                 context={"trace_id": self.source.trace_id, "mismatches": mismatches},
             )
+        reference_clusters = tuple(
+            (cluster.pair_id, cluster.packets)
+            for cluster in reference.episode_clusters
+        )
+        cluster_mismatches = tuple(
+            report.policy
+            for report in self.reports[1:]
+            if tuple(
+                (cluster.pair_id, cluster.packets)
+                for cluster in report.episode_clusters
+            )
+            != reference_clusters
+        )
+        if cluster_mismatches:
+            raise MatchedCampaignError(
+                "policies did not replay identical pair-episode clusters",
+                context={
+                    "trace_id": self.source.trace_id,
+                    "policies": cluster_mismatches,
+                },
+            )
         seeds = {report.environment_seed for report in self.reports}
         if len(seeds) != 1:
             raise MatchedCampaignError(

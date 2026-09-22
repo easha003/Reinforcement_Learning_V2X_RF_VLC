@@ -84,6 +84,59 @@ class BootstrapObservationReference:
 
 
 @dataclass(frozen=True, slots=True)
+class EpisodeClusterTally:
+    """Compact policy metrics for one trajectory/pair episode cluster."""
+
+    pair_id: str
+    packets: int
+    misses: int
+    conditional_risk_sum: float
+    reward_sum: float
+    action_counts: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pair_id, str) or not self.pair_id.strip():
+            raise DeterministicRolloutError("episode cluster pair_id must be non-empty")
+        if (
+            not isinstance(self.packets, int)
+            or isinstance(self.packets, bool)
+            or self.packets <= 0
+            or not isinstance(self.misses, int)
+            or isinstance(self.misses, bool)
+            or not 0 <= self.misses <= self.packets
+        ):
+            raise DeterministicRolloutError("episode cluster counts are invalid")
+        if (
+            not math.isfinite(self.conditional_risk_sum)
+            or not 0.0 <= self.conditional_risk_sum <= self.packets
+        ):
+            raise DeterministicRolloutError(
+                "episode conditional-risk sum must lie within its packet count"
+            )
+        if not math.isfinite(self.reward_sum) or self.reward_sum >= 0.0:
+            raise DeterministicRolloutError(
+                "episode reward sum must be finite and negative"
+            )
+        if (
+            not isinstance(self.action_counts, tuple)
+            or len(self.action_counts) != len(PolicyAction)
+            or any(
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 0
+                for count in self.action_counts
+            )
+            or sum(self.action_counts) != self.packets
+        ):
+            raise DeterministicRolloutError(
+                "episode action counts must partition its packets"
+            )
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class DeterministicRolloutReport:
     """Compact counters and a content fingerprint for one validation run."""
 
@@ -109,7 +162,9 @@ class DeterministicRolloutReport:
     conditional_risk_sum: float
     reserved_rf_attempts: int
     vlc_activations: int
+    action_counts: tuple[int, ...]
     max_population: int
+    pool_utilization_sum: float
     max_pool_utilization: float
     normalization_training_rows: int
     normalization_total_training_rows: int
@@ -117,6 +172,7 @@ class DeterministicRolloutReport:
     normalization_frozen: bool
     matched_tape_fingerprint: str
     fingerprint: str
+    episode_clusters: tuple[EpisodeClusterTally, ...]
 
     def __post_init__(self) -> None:
         integer_fields = (
@@ -166,8 +222,10 @@ class DeterministicRolloutReport:
             raise DeterministicRolloutError("reward_sum must be finite and non-positive")
         if not math.isfinite(self.conditional_risk_sum) or self.conditional_risk_sum < 0:
             raise DeterministicRolloutError("conditional_risk_sum must be finite and non-negative")
-        if not math.isfinite(self.max_pool_utilization) or self.max_pool_utilization < 0.0:
-            raise DeterministicRolloutError("max_pool_utilization must be finite and non-negative")
+        for name in ("pool_utilization_sum", "max_pool_utilization"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0.0:
+                raise DeterministicRolloutError(f"{name} must be finite and non-negative")
         for name in ("matched_tape_fingerprint", "fingerprint"):
             if len(getattr(self, name)) != 64:
                 raise DeterministicRolloutError(f"{name} must be a SHA-256 digest")
@@ -187,6 +245,58 @@ class DeterministicRolloutReport:
         if self.normalization_updates_enabled and self.split != "train":
             raise DeterministicRolloutError(
                 "only a training rollout may update normalization"
+            )
+        if (
+            not isinstance(self.action_counts, tuple)
+            or len(self.action_counts) != len(PolicyAction)
+            or any(
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 0
+                for count in self.action_counts
+            )
+            or sum(self.action_counts) != self.transitions
+        ):
+            raise DeterministicRolloutError(
+                "rollout action counts must partition all transitions"
+            )
+        if not isinstance(self.episode_clusters, tuple) or any(
+            not isinstance(cluster, EpisodeClusterTally)
+            for cluster in self.episode_clusters
+        ):
+            raise DeterministicRolloutError(
+                "rollout episode clusters must be immutable validated tallies"
+            )
+        pair_ids = tuple(cluster.pair_id for cluster in self.episode_clusters)
+        if pair_ids != tuple(sorted(pair_ids)) or len(pair_ids) != len(set(pair_ids)):
+            raise DeterministicRolloutError(
+                "rollout episode clusters must use unique canonical pair IDs"
+            )
+        cluster_action_counts = tuple(
+            sum(cluster.action_counts[index] for cluster in self.episode_clusters)
+            for index in range(len(PolicyAction))
+        )
+        if (
+            sum(cluster.packets for cluster in self.episode_clusters) != self.transitions
+            or sum(cluster.misses for cluster in self.episode_clusters) != self.misses
+            or cluster_action_counts != self.action_counts
+            or not math.isclose(
+                math.fsum(
+                    cluster.conditional_risk_sum for cluster in self.episode_clusters
+                ),
+                self.conditional_risk_sum,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+            or not math.isclose(
+                math.fsum(cluster.reward_sum for cluster in self.episode_clusters),
+                self.reward_sum,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+        ):
+            raise DeterministicRolloutError(
+                "episode cluster tallies do not reconcile with rollout totals"
             )
 
     def as_dict(self) -> dict[str, object]:
@@ -442,6 +552,13 @@ def run_policy_rollout_with_state(
     reserved_rf_attempts = vlc_activations = max_population = 0
     reward_terms: list[float] = []
     conditional_risk_terms: list[float] = []
+    pool_utilization_terms: list[float] = []
+    action_counts = [0] * len(PolicyAction)
+    cluster_packets: dict[str, int] = {}
+    cluster_misses: dict[str, int] = {}
+    cluster_risks: dict[str, list[float]] = {}
+    cluster_rewards: dict[str, list[float]] = {}
+    cluster_actions: dict[str, list[int]] = {}
     max_pool_utilization = 0.0
 
     for frame in reader.iter_frames(max_frames=max_frames):
@@ -574,6 +691,21 @@ def run_policy_rollout_with_state(
                     tapes[outcome.pair_id],
                 ),
             )
+            pair_id = outcome.pair_id
+            cluster_packets[pair_id] = cluster_packets.get(pair_id, 0) + 1
+            cluster_misses[pair_id] = (
+                cluster_misses.get(pair_id, 0) + outcome.sampled_miss_cost
+            )
+            cluster_risks.setdefault(pair_id, []).append(
+                outcome.conditional_miss_probability
+            )
+            cluster_rewards.setdefault(pair_id, []).append(outcome.reward)
+            per_action = cluster_actions.setdefault(
+                pair_id,
+                [0] * len(PolicyAction),
+            )
+            per_action[int(outcome.action)] += 1
+            action_counts[int(outcome.action)] += 1
         actor_assembler.close_frame(pool_response)
         for pair_id in boundary.final_pair_ids:
             physical.release(pair_id)
@@ -590,9 +722,10 @@ def run_policy_rollout_with_state(
         internal_truncations += len(boundary.bootstrap_pair_ids)
         trace_end_truncations += sum(reason == "trace_end" for reason in boundary.end_reasons)
         misses += int(np.sum(outcomes.sampled_miss_costs, dtype=np.float64))
-        reward_terms.extend(float(value) for value in outcomes.rewards)
+        reward_terms.extend(outcome.reward for outcome in outcomes.pair_outcomes)
         conditional_risk_terms.extend(
-            float(value) for value in outcomes.conditional_miss_probabilities
+            outcome.conditional_miss_probability
+            for outcome in outcomes.pair_outcomes
         )
         reserved_rf_attempts += ledger.total_reserved_rf_attempts
         vlc_activations += ledger.total_vlc_activations
@@ -601,6 +734,7 @@ def run_policy_rollout_with_state(
             max_pool_utilization,
             pool_response.pool_utilization,
         )
+        pool_utilization_terms.append(pool_response.pool_utilization)
 
         _fingerprint_update(
             digest,
@@ -641,6 +775,17 @@ def run_policy_rollout_with_state(
         {"normalization_state": final_normalization_payload},
     )
     source_exhausted = frames == reader.decision_frame_count
+    episode_clusters = tuple(
+        EpisodeClusterTally(
+            pair_id=pair_id,
+            packets=cluster_packets[pair_id],
+            misses=cluster_misses[pair_id],
+            conditional_risk_sum=math.fsum(cluster_risks[pair_id]),
+            reward_sum=math.fsum(cluster_rewards[pair_id]),
+            action_counts=tuple(cluster_actions[pair_id]),
+        )
+        for pair_id in sorted(cluster_packets)
+    )
     report = DeterministicRolloutReport(
         trace_id=source.trace_id,
         split=source.split,
@@ -664,7 +809,9 @@ def run_policy_rollout_with_state(
         conditional_risk_sum=math.fsum(conditional_risk_terms),
         reserved_rf_attempts=reserved_rf_attempts,
         vlc_activations=vlc_activations,
+        action_counts=tuple(action_counts),
         max_population=max_population,
+        pool_utilization_sum=math.fsum(pool_utilization_terms),
         max_pool_utilization=max_pool_utilization,
         normalization_training_rows=(
             normalizer.training_rows - normalization_rows_before
@@ -674,6 +821,7 @@ def run_policy_rollout_with_state(
         normalization_frozen=final_normalization_state.frozen,
         matched_tape_fingerprint=tape_digest.hexdigest(),
         fingerprint=digest.hexdigest(),
+        episode_clusters=episode_clusters,
     )
     return PolicyRolloutResult(
         report=report,
@@ -738,6 +886,7 @@ __all__ = [
     "BootstrapObservationReference",
     "DeterministicRolloutError",
     "DeterministicRolloutReport",
+    "EpisodeClusterTally",
     "PolicyRolloutResult",
     "canonical_policy_name",
     "run_deterministic_rollout",
