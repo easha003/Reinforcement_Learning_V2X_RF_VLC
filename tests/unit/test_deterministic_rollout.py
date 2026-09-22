@@ -277,6 +277,18 @@ def test_supervised_baseline_requires_training_fit_and_runs_common_path(config, 
     assert estimator.training_rows == 64
 
 
+def test_supervised_estimator_artifact_round_trip(config) -> None:
+    estimator = _fitted_estimator(config)
+
+    restored = SupervisedOpticalRiskEstimator.from_dict(estimator.as_dict())
+
+    assert restored == estimator
+    corrupted = estimator.as_dict()
+    corrupted["schema"] = "wrong"
+    with pytest.raises(BaselinePolicyError, match="schema"):
+        SupervisedOpticalRiskEstimator.from_dict(corrupted)
+
+
 def test_shared_runner_never_passes_truth_to_a_causal_policy(config, source) -> None:
     class CausalProbe:
         name = "causal-truth-boundary-probe"

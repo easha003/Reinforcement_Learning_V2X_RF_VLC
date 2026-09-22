@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -39,13 +40,17 @@ from hybrid_v2x_rl.env.episodes import VehiclePose
 from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, PopulationFrameReader
-from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizer
+from hybrid_v2x_rl.mean_field.normalization import (
+    ObservationNormalizationState,
+    ObservationNormalizer,
+)
 from hybrid_v2x_rl.mean_field.packet_outcomes import assemble_frame_outcomes
 from hybrid_v2x_rl.mean_field.policy_interface import (
     OracleChannelTruth,
     PopulationPolicy,
     PopulationPolicyFrame,
 )
+from hybrid_v2x_rl.mean_field.random_tape import MATCHED_TAPE_SCHEMA
 from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
 from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 from hybrid_v2x_rl.mean_field.seeding import EnvironmentSeedState
@@ -83,6 +88,7 @@ class DeterministicRolloutReport:
     """Compact counters and a content fingerprint for one validation run."""
 
     trace_id: str
+    split: str
     policy: str
     environment_seed: int
     policy_seed: int
@@ -106,6 +112,10 @@ class DeterministicRolloutReport:
     max_population: int
     max_pool_utilization: float
     normalization_training_rows: int
+    normalization_total_training_rows: int
+    normalization_updates_enabled: bool
+    normalization_frozen: bool
+    matched_tape_fingerprint: str
     fingerprint: str
 
     def __post_init__(self) -> None:
@@ -127,6 +137,7 @@ class DeterministicRolloutReport:
             "vlc_activations",
             "max_population",
             "normalization_training_rows",
+            "normalization_total_training_rows",
         )
         if any(
             not isinstance(getattr(self, name), int)
@@ -143,25 +154,72 @@ class DeterministicRolloutReport:
             raise DeterministicRolloutError("requested_max_frames must be positive or None")
         if type(self.source_exhausted) is not bool:
             raise DeterministicRolloutError("source_exhausted must be boolean")
+        if self.split not in ("train", "validation", "test"):
+            raise DeterministicRolloutError("rollout split must be train, validation, or test")
+        if type(self.normalization_updates_enabled) is not bool:
+            raise DeterministicRolloutError(
+                "normalization_updates_enabled must be boolean"
+            )
+        if type(self.normalization_frozen) is not bool:
+            raise DeterministicRolloutError("normalization_frozen must be boolean")
         if not math.isfinite(self.reward_sum) or self.reward_sum > 0.0:
             raise DeterministicRolloutError("reward_sum must be finite and non-positive")
         if not math.isfinite(self.conditional_risk_sum) or self.conditional_risk_sum < 0:
             raise DeterministicRolloutError("conditional_risk_sum must be finite and non-negative")
         if not math.isfinite(self.max_pool_utilization) or self.max_pool_utilization < 0.0:
             raise DeterministicRolloutError("max_pool_utilization must be finite and non-negative")
-        if len(self.fingerprint) != 64:
-            raise DeterministicRolloutError("fingerprint must be a SHA-256 digest")
+        for name in ("matched_tape_fingerprint", "fingerprint"):
+            if len(getattr(self, name)) != 64:
+                raise DeterministicRolloutError(f"{name} must be a SHA-256 digest")
         if self.usable_transitions + self.fallback_transitions != self.transitions:
             raise DeterministicRolloutError(
                 "usable and fallback counts must partition all transitions"
             )
-        if self.normalization_training_rows != self.usable_transitions:
+        if self.normalization_total_training_rows < self.normalization_training_rows:
             raise DeterministicRolloutError(
-                "normalization must update from every and only usable transition"
+                "total normalization rows cannot be smaller than this rollout's updates"
+            )
+        expected_updates = self.usable_transitions if self.normalization_updates_enabled else 0
+        if self.normalization_training_rows != expected_updates:
+            raise DeterministicRolloutError(
+                "normalization must update from every and only eligible usable transition"
+            )
+        if self.normalization_updates_enabled and self.split != "train":
+            raise DeterministicRolloutError(
+                "only a training rollout may update normalization"
             )
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyRolloutResult:
+    """One rollout report plus the checkpointable normalizer state it produced."""
+
+    report: DeterministicRolloutReport
+    normalization_state: ObservationNormalizationState
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.report, DeterministicRolloutReport):
+            raise DeterministicRolloutError("policy rollout result requires a report")
+        if not isinstance(self.normalization_state, ObservationNormalizationState):
+            raise DeterministicRolloutError(
+                "policy rollout result requires normalization state"
+            )
+        if (
+            self.report.normalization_total_training_rows
+            != self.normalization_state.count[
+                self.normalization_state.standardized.index(True)
+            ]
+        ):
+            raise DeterministicRolloutError(
+                "rollout report and normalization checkpoint counts differ"
+            )
+        if self.report.normalization_frozen != self.normalization_state.frozen:
+            raise DeterministicRolloutError(
+                "rollout report and normalization checkpoint freeze state differ"
+            )
 
 
 def canonical_policy_name(policy: str) -> str:
@@ -277,7 +335,7 @@ def _fingerprint_update(digest: _Digest, payload: object) -> None:
     digest.update(b"\n")
 
 
-def run_policy_rollout(
+def run_policy_rollout_with_state(
     config: ProjectConfig,
     source: FrameTraceSource,
     *,
@@ -285,7 +343,9 @@ def run_policy_rollout(
     environment_seed: int | None = None,
     policy_seed: int = 0,
     max_frames: int | None = None,
-) -> DeterministicRolloutReport:
+    normalization_state: ObservationNormalizationState | Mapping[str, object] | None = None,
+    freeze_normalization_at_end: bool = False,
+) -> PolicyRolloutResult:
     """Run any population policy through the one authoritative environment path.
 
     ``max_frames`` is a diagnostic processing cutoff.  It does not manufacture
@@ -309,6 +369,8 @@ def run_policy_rollout(
         not isinstance(max_frames, int) or isinstance(max_frames, bool) or max_frames <= 0
     ):
         raise DeterministicRolloutError("max_frames must be positive or None")
+    if type(freeze_normalization_at_end) is not bool:
+        raise DeterministicRolloutError("freeze_normalization_at_end must be boolean")
     canonical_policy = policy.name
 
     seed_state = EnvironmentSeedState.from_config(
@@ -338,10 +400,21 @@ def run_policy_rollout(
         config.rf,
         config.vlc,
     )
-    normalizer = ObservationNormalizer.from_config(config)
+    if normalization_state is None:
+        normalizer = ObservationNormalizer.from_config(config)
+    else:
+        payload = (
+            normalization_state.as_dict()
+            if isinstance(normalization_state, ObservationNormalizationState)
+            else normalization_state
+        )
+        normalizer = ObservationNormalizer.from_state_dict(config, payload)
+    normalization_rows_before = normalizer.training_rows
+    normalization_updates_enabled = not normalizer.frozen
     resource_map = ActionResourceMap.from_config(config.environment, config.cost)
 
     digest = hashlib.sha256()
+    tape_digest = hashlib.sha256()
     _fingerprint_update(
         digest,
         {
@@ -350,6 +423,15 @@ def run_policy_rollout(
             "policy": canonical_policy,
             "environment_seed": seed_state.active_root_seed,
             "policy_seed": policy_seed,
+            "max_frames": max_frames,
+        },
+    )
+    _fingerprint_update(
+        tape_digest,
+        {
+            "schema": MATCHED_TAPE_SCHEMA,
+            "trace_id": source.trace_id,
+            "environment_seed": seed_state.active_root_seed,
             "max_frames": max_frames,
         },
     )
@@ -367,6 +449,15 @@ def run_policy_rollout(
         normalized_frame = normalizer.begin_frame(frame, actor_frame)
         observation = normalized_frame.observation
         tapes = randomness.packet_tapes(frame)
+        _fingerprint_update(
+            tape_digest,
+            {
+                "frame_index": frame.index,
+                "tapes": [
+                    asdict(tapes[pair_id]) for pair_id in frame.active_pair_ids
+                ],
+            },
+        )
         # Physical truth is action-independent and may be materialized before
         # the joint decision.  It crosses the policy boundary only for the
         # explicitly non-deployable oracle; deployable policies receive None.
@@ -540,11 +631,19 @@ def run_policy_rollout(
             },
         )
 
-    normalization_state = dict(normalizer.state_dict())
-    _fingerprint_update(digest, {"normalization_state": normalization_state})
+    if freeze_normalization_at_end and not normalizer.frozen:
+        final_normalization_state = normalizer.freeze()
+    else:
+        final_normalization_state = normalizer.snapshot()
+    final_normalization_payload = final_normalization_state.as_dict()
+    _fingerprint_update(
+        digest,
+        {"normalization_state": final_normalization_payload},
+    )
     source_exhausted = frames == reader.decision_frame_count
-    return DeterministicRolloutReport(
+    report = DeterministicRolloutReport(
         trace_id=source.trace_id,
+        split=source.split,
         policy=canonical_policy,
         environment_seed=seed_state.active_root_seed,
         policy_seed=policy_seed,
@@ -567,9 +666,40 @@ def run_policy_rollout(
         vlc_activations=vlc_activations,
         max_population=max_population,
         max_pool_utilization=max_pool_utilization,
-        normalization_training_rows=normalizer.training_rows,
+        normalization_training_rows=(
+            normalizer.training_rows - normalization_rows_before
+        ),
+        normalization_total_training_rows=normalizer.training_rows,
+        normalization_updates_enabled=normalization_updates_enabled,
+        normalization_frozen=final_normalization_state.frozen,
+        matched_tape_fingerprint=tape_digest.hexdigest(),
         fingerprint=digest.hexdigest(),
     )
+    return PolicyRolloutResult(
+        report=report,
+        normalization_state=final_normalization_state,
+    )
+
+
+def run_policy_rollout(
+    config: ProjectConfig,
+    source: FrameTraceSource,
+    *,
+    policy: PopulationPolicy,
+    environment_seed: int | None = None,
+    policy_seed: int = 0,
+    max_frames: int | None = None,
+) -> DeterministicRolloutReport:
+    """Backward-compatible report-only population rollout entry point."""
+
+    return run_policy_rollout_with_state(
+        config,
+        source,
+        policy=policy,
+        environment_seed=environment_seed,
+        policy_seed=policy_seed,
+        max_frames=max_frames,
+    ).report
 
 
 def run_deterministic_rollout(
@@ -608,8 +738,10 @@ __all__ = [
     "BootstrapObservationReference",
     "DeterministicRolloutError",
     "DeterministicRolloutReport",
+    "PolicyRolloutResult",
     "canonical_policy_name",
     "run_deterministic_rollout",
     "run_policy_rollout",
+    "run_policy_rollout_with_state",
     "trace_source",
 ]

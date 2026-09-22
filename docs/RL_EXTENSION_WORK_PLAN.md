@@ -532,7 +532,7 @@ Establish whether RL has a genuine opportunity and define the comparisons requir
 ### Tasks
 
 - [x] Implement every baseline through the same environment and accounting path.
-- [ ] Use matched trace splits and matched random numbers for policy comparison.
+- [x] Use matched trace splits and matched random numbers for policy comparison.
 - [ ] Verify expected ordering in simple/limiting scenarios.
 - [ ] Report reliability and resource metrics at each density.
 - [ ] Measure the gap between the best deployable baseline and oracle.

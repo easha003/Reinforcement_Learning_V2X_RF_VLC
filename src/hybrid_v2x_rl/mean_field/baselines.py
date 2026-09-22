@@ -10,7 +10,7 @@ feedback, and lifecycle code used by random policies and, later, PPO.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -39,6 +39,7 @@ BASELINE_GEOMETRY_THRESHOLD: Final = "geometry-threshold"
 BASELINE_CONTEXTUAL: Final = "contextual-no-history"
 BASELINE_SUPERVISED: Final = "supervised-risk-allocation"
 BASELINE_ORACLE: Final = "truth-risk-oracle"
+OPTICAL_ESTIMATOR_SCHEMA: Final = "hybrid-rf-vlc-rl.supervised-optical-risk.v1"
 BASELINE_ALWAYS_RF: Final = tuple(f"always-rf-{attempts}" for attempts in range(1, 5))
 BASELINE_NAMES: Final = (
     *BASELINE_ALWAYS_RF,
@@ -383,6 +384,71 @@ class SupervisedOpticalRiskEstimator:
         logits = np.clip(design @ np.asarray(self.weights), -40.0, 40.0)
         return np.asarray(1.0 / (1.0 + np.exp(-logits)), dtype=np.float64)
 
+    def as_dict(self) -> dict[str, object]:
+        """Return a versioned JSON-safe training artifact."""
+
+        return {
+            "schema": OPTICAL_ESTIMATOR_SCHEMA,
+            "feature_names": list(self.feature_names),
+            "mean": list(self.mean),
+            "scale": list(self.scale),
+            "weights": list(self.weights),
+            "ridge": self.ridge,
+            "training_rows": self.training_rows,
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: Mapping[str, object],
+    ) -> SupervisedOpticalRiskEstimator:
+        """Restore an estimator only from its exact artifact schema."""
+
+        expected = {
+            "schema",
+            "feature_names",
+            "mean",
+            "scale",
+            "weights",
+            "ridge",
+            "training_rows",
+        }
+        if set(payload) != expected:
+            raise BaselinePolicyError("optical estimator artifact fields are invalid")
+        if payload["schema"] != OPTICAL_ESTIMATOR_SCHEMA:
+            raise BaselinePolicyError("optical estimator artifact schema is unsupported")
+
+        def numeric_tuple(name: str) -> tuple[float, ...]:
+            values = payload[name]
+            if not isinstance(values, list | tuple):
+                raise BaselinePolicyError(f"optical estimator {name} must be an array")
+            try:
+                return tuple(float(value) for value in values)
+            except (TypeError, ValueError) as error:
+                raise BaselinePolicyError(
+                    f"optical estimator {name} must be numeric"
+                ) from error
+
+        names = payload["feature_names"]
+        ridge = payload["ridge"]
+        training_rows = payload["training_rows"]
+        if not isinstance(names, list | tuple) or any(
+            not isinstance(name, str) for name in names
+        ):
+            raise BaselinePolicyError("optical estimator feature_names must be strings")
+        if not isinstance(ridge, int | float) or isinstance(ridge, bool):
+            raise BaselinePolicyError("optical estimator ridge must be numeric")
+        if not isinstance(training_rows, int) or isinstance(training_rows, bool):
+            raise BaselinePolicyError("optical estimator training_rows must be an integer")
+        return cls(
+            feature_names=tuple(names),
+            mean=numeric_tuple("mean"),
+            scale=numeric_tuple("scale"),
+            weights=numeric_tuple("weights"),
+            ridge=float(ridge),
+            training_rows=training_rows,
+        )
+
 
 def _risk_matrix(
     decision: PopulationPolicyFrame,
@@ -722,6 +788,7 @@ __all__ = [
     "BASELINE_SUPERVISED",
     "CONTEXTUAL_FEATURES",
     "OPTICAL_ESTIMATOR_FEATURES",
+    "OPTICAL_ESTIMATOR_SCHEMA",
     "BaselinePolicyError",
     "ContextualNoHistoryBaseline",
     "FixedActionBaseline",
