@@ -27,10 +27,19 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from hybrid_v2x_rl.channels.rf.fading import FadingProcess
-from hybrid_v2x_rl.channels.rf.model import RFChannelRequest, RFPacketRandomness
+from hybrid_v2x_rl.channels.rf.model import (
+    RFChannelRequest,
+    RFPacketRandomness,
+    RFPropagationRequest,
+    RFPropagationResult,
+)
 from hybrid_v2x_rl.channels.rf.pathloss_37885 import blockage_mean_db, blockage_sigma_db
 from hybrid_v2x_rl.channels.rf.shadowing import ShadowingProcess
-from hybrid_v2x_rl.channels.vlc.model import VLCChannelRequest, VLCPacketRandomness
+from hybrid_v2x_rl.channels.vlc.model import (
+    VLCChannelRequest,
+    VLCChannelResult,
+    VLCPacketRandomness,
+)
 from hybrid_v2x_rl.core.enums import RFPropagationState
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.geometry import OrientedRectangle, Segment
@@ -39,7 +48,11 @@ from hybrid_v2x_rl.core.link_endpoints import (
     optical_link_path,
     rf_link_path,
 )
-from hybrid_v2x_rl.core.pair_geometry import DEFAULT_FOV_HALF_ANGLE_RAD, pair_geometry
+from hybrid_v2x_rl.core.pair_geometry import (
+    DEFAULT_FOV_HALF_ANGLE_RAD,
+    PairGeometry,
+    pair_geometry,
+)
 from hybrid_v2x_rl.core.randomness import derive_seed, make_generator
 from hybrid_v2x_rl.env.episodes import VehiclePose
 from hybrid_v2x_rl.env.packet import Action, PacketLifecycle, PacketOutcome, PacketTape
@@ -103,6 +116,26 @@ class PacketContext:
     occluded: bool
     within_field_of_view: bool
     neighbour_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PairChannelEvaluation:
+    """Action-independent RF and VLC truth after one physical-state advance."""
+
+    context: PacketContext
+    rf_propagation: RFPropagationResult
+    vlc_result: VLCChannelResult
+
+
+@dataclass(frozen=True, slots=True)
+class _AdvancedPairState:
+    """Internal physical state shared by legacy and population evaluators."""
+
+    context: PacketContext
+    rf_propagation_request: RFPropagationRequest
+    geometry: PairGeometry
+    occluded: bool
+    fading_power_gains: tuple[float, ...]
 
 
 ActionChooser = Callable[[PacketContext], Action]
@@ -245,6 +278,111 @@ class Rollout:
     ) -> tuple[PacketOutcome, PacketContext, dict[str, PacketOutcome] | None]:
         """One packet at one pair pose."""
 
+        state = self._advance_pair_state(
+            trace_id=trace_id,
+            pair_id=pair_id,
+            density=density,
+            time_s=time_s,
+            transmitter=transmitter,
+            receiver=receiver,
+            neighbours=neighbours,
+            index_of_frame=index_of_frame,
+        )
+        tape = self._tape(trace_id, pair_id, index, state.fading_power_gains)
+
+        propagation = state.rf_propagation_request
+        rf_request = RFChannelRequest(
+            distance_m=propagation.distance_m,
+            propagation_state=propagation.propagation_state,
+            blockage_db=propagation.blockage_db,
+            shadowing_normalized=propagation.shadowing_normalized,
+            # Superseded per attempt by the tape's hopped gains; carried so a
+            # caller that supplies no gains still gets an unfaded budget rather
+            # than a zero one.
+            fading_power_gain=1.0,
+            neighbour_count=state.context.neighbour_count,
+            sensed_fraction=self.sensed_fraction,
+            randomness=tape.rf_attempts[0],
+        )
+        vlc_request = VLCChannelRequest(
+            geometry=state.geometry,
+            occluded=state.occluded,
+            randomness=tape.vlc,
+        )
+
+        alternatives = None
+        if counterfactual:
+            alternatives = self.lifecycle.counterfactuals(
+                rf_request=rf_request, vlc_request=vlc_request, tape=tape
+            )
+        outcome = self.lifecycle.run(
+            action=choose(state.context),
+            rf_request=rf_request,
+            vlc_request=vlc_request,
+            tape=tape,
+        )
+        return outcome, state.context, alternatives
+
+    def evaluate_channels(
+        self,
+        *,
+        trace_id: str,
+        pair_id: str,
+        density: float,
+        time_s: float,
+        transmitter: VehiclePose,
+        receiver: VehiclePose,
+        neighbours: Sequence[VehiclePose],
+        index_of_frame: SpatialIndex,
+        vlc_randomness: VLCPacketRandomness,
+    ) -> PairChannelEvaluation:
+        """Advance one pair once and expose action-independent channel truth.
+
+        The population environment supplies its identity-addressed optical draw.
+        RF access randomness remains in the matched packet tape and is consumed
+        only after the complete joint action fixes shared-pool contention.
+        """
+
+        if not isinstance(vlc_randomness, VLCPacketRandomness):
+            raise TypeError("vlc_randomness must be VLCPacketRandomness")
+        state = self._advance_pair_state(
+            trace_id=trace_id,
+            pair_id=pair_id,
+            density=density,
+            time_s=time_s,
+            transmitter=transmitter,
+            receiver=receiver,
+            neighbours=neighbours,
+            index_of_frame=index_of_frame,
+        )
+        return PairChannelEvaluation(
+            context=state.context,
+            rf_propagation=self.lifecycle.rf.evaluate_propagation(
+                state.rf_propagation_request
+            ),
+            vlc_result=self.lifecycle.vlc.evaluate(
+                VLCChannelRequest(
+                    geometry=state.geometry,
+                    occluded=state.occluded,
+                    randomness=vlc_randomness,
+                )
+            ),
+        )
+
+    def _advance_pair_state(
+        self,
+        *,
+        trace_id: str,
+        pair_id: str,
+        density: float,
+        time_s: float,
+        transmitter: VehiclePose,
+        receiver: VehiclePose,
+        neighbours: Sequence[VehiclePose],
+        index_of_frame: SpatialIndex,
+    ) -> _AdvancedPairState:
+        """Advance correlated channel state without selecting or sampling an action."""
+
         self._bind_trace(trace_id)
 
         geometry = pair_geometry(
@@ -252,7 +390,9 @@ class Rollout:
         )
         optical = optical_link_path(transmitter, receiver)
         radio = rf_link_path(transmitter, receiver)
-        widest = max(0.5 * math.hypot(v.length_m, v.width_m) for v in neighbours) if neighbours else 3.0
+        widest = (
+            max(0.5 * math.hypot(v.length_m, v.width_m) for v in neighbours) if neighbours else 3.0
+        )
 
         exclude = (transmitter.vehicle_id, receiver.vehicle_id)
         optical_blockers = index_of_frame.candidates(optical.segment, margin_m=widest)
@@ -290,8 +430,11 @@ class Rollout:
         blockage_db = 0.0
         if visibility.state is RFPropagationState.NLOSV and visibility.vehicle_blocker_ids:
             tallest = max(
-                (v.height_m for v in radio_blockers
-                 if v.vehicle_id in visibility.vehicle_blocker_ids),
+                (
+                    v.height_m
+                    for v in radio_blockers
+                    if v.vehicle_id in visibility.vehicle_blocker_ids
+                ),
                 default=DEFAULT_RF_ANTENNA_HEIGHT_M,
             )
             residual = self.shadowing.advance(
@@ -328,37 +471,24 @@ class Rollout:
             within_field_of_view=geometry.within_field_of_view,
             neighbour_count=contenders,
         )
-        tape = self._tape(trace_id, pair_id, index, gains)
-
-        rf_request = RFChannelRequest(
+        rf_request = RFPropagationRequest(
             distance_m=max(geometry.separation_m, 1.0),
             propagation_state=visibility.state,
             blockage_db=blockage_db,
             shadowing_normalized=normalized,
-            # Superseded per attempt by the tape's hopped gains; carried so a
-            # caller that supplies no gains still gets an unfaded budget rather
-            # than a zero one.
-            fading_power_gain=1.0,
-            neighbour_count=contenders,
-            sensed_fraction=self.sensed_fraction,
-            randomness=tape.rf_attempts[0],
+            # The shared-pool model currently exposes one propagation risk for
+            # every reserved attempt.  Use the first frequency-hop state as that
+            # contract's focal attempt; legacy replay below still consumes the
+            # complete hopped sequence from ``fading_power_gains``.
+            fading_power_gain=float(gains[0]),
         )
-        vlc_request = VLCChannelRequest(
-            geometry=geometry, occluded=occluded, randomness=tape.vlc
+        return _AdvancedPairState(
+            context=context,
+            rf_propagation_request=rf_request,
+            geometry=geometry,
+            occluded=occluded,
+            fading_power_gains=tuple(float(gain) for gain in gains),
         )
-
-        alternatives = None
-        if counterfactual:
-            alternatives = self.lifecycle.counterfactuals(
-                rf_request=rf_request, vlc_request=vlc_request, tape=tape
-            )
-        outcome = self.lifecycle.run(
-            action=choose(context),
-            rf_request=rf_request,
-            vlc_request=vlc_request,
-            tape=tape,
-        )
-        return outcome, context, alternatives
 
     def release(self, pair_id: str) -> None:
         """Drop a finished pair's shadowing state.
@@ -397,6 +527,7 @@ __all__ = [
     "CONTENTION_RADIUS_M",
     "DEFAULT_SENSED_FRACTION",
     "ActionChooser",
+    "PairChannelEvaluation",
     "PacketContext",
     "Rollout",
     "RolloutSeedError",

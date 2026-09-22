@@ -1,0 +1,541 @@
+"""Replay-check harness for the complete Phase 5 population data path.
+
+This is deliberately not a training environment.  It composes the real trace
+reader, causal observation boundary, action masks, joint-action accounting,
+shared RF pool, matched packet tapes, physical channels, packet outcomes, and
+pair lifecycle masks so long runs can fail fast before PPO is introduced.
+
+Unusable causal rows never reach a policy.  ``FrameObservation`` still needs a
+finite rectangular array for contract validation, so those rows receive an
+internal all-zero sentinel while :class:`MaskedActionSpace` independently
+forces the configured fallback action and the return boundary marks them as
+non-learning rows.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Final, Protocol, cast
+
+import numpy as np
+
+from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
+from hybrid_v2x_rl.config.hashing import config_hash
+from hybrid_v2x_rl.config.models import ProjectConfig
+from hybrid_v2x_rl.core.errors import HybridV2XError
+from hybrid_v2x_rl.core.policy_actions import (
+    ActionResourceMap,
+    PolicyAction,
+    action_resources,
+)
+from hybrid_v2x_rl.core.randomness import make_generator
+from hybrid_v2x_rl.env.assembly import build_rollout
+from hybrid_v2x_rl.env.episodes import VehiclePose
+from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
+from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
+from hybrid_v2x_rl.mean_field.actor_observations import CausalActorFrame
+from hybrid_v2x_rl.mean_field.environment_api import (
+    FrameAPISchema,
+    FrameObservation,
+)
+from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, PopulationFrameReader
+from hybrid_v2x_rl.mean_field.packet_outcomes import assemble_frame_outcomes
+from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
+from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
+from hybrid_v2x_rl.mean_field.seeding import EnvironmentSeedState
+
+POLICY_RANDOM: Final = "random"
+POLICY_CYCLE: Final = "cycle"
+POLICY_NAMES: Final = (POLICY_RANDOM, POLICY_CYCLE)
+_POLICY_STREAM: Final = "hybrid-rf-vlc-rl.phase5-validation-policy.v1"
+
+
+class DeterministicRolloutError(HybridV2XError):
+    """A validation rollout request or composed invariant is invalid."""
+
+
+class _Digest(Protocol):
+    def update(self, data: bytes) -> object: ...
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapObservationReference:
+    """Identity of a required internal-truncation bootstrap observation.
+
+    The Phase 5 harness validates exact coverage without inventing a numeric
+    actor tensor.  A future trainable environment must replace this reference
+    with the separately materialized final observation before value inference.
+    """
+
+    trace_id: str
+    pair_id: str
+    next_frame_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class DeterministicRolloutReport:
+    """Compact counters and a content fingerprint for one validation run."""
+
+    trace_id: str
+    policy: str
+    environment_seed: int
+    policy_seed: int
+    requested_max_frames: int | None
+    available_frames: int
+    frames: int
+    source_exhausted: bool
+    nonempty_frames: int
+    transitions: int
+    usable_transitions: int
+    fallback_transitions: int
+    births: int
+    natural_terminations: int
+    internal_truncations: int
+    trace_end_truncations: int
+    misses: int
+    reward_sum: float
+    conditional_risk_sum: float
+    reserved_rf_attempts: int
+    vlc_activations: int
+    max_population: int
+    max_pool_utilization: float
+    fingerprint: str
+
+    def __post_init__(self) -> None:
+        integer_fields = (
+            "environment_seed",
+            "policy_seed",
+            "available_frames",
+            "frames",
+            "nonempty_frames",
+            "transitions",
+            "usable_transitions",
+            "fallback_transitions",
+            "births",
+            "natural_terminations",
+            "internal_truncations",
+            "trace_end_truncations",
+            "misses",
+            "reserved_rf_attempts",
+            "vlc_activations",
+            "max_population",
+        )
+        if any(
+            not isinstance(getattr(self, name), int)
+            or isinstance(getattr(self, name), bool)
+            or getattr(self, name) < 0
+            for name in integer_fields
+        ):
+            raise DeterministicRolloutError("rollout report integer counters must be non-negative")
+        if self.requested_max_frames is not None and (
+            not isinstance(self.requested_max_frames, int)
+            or isinstance(self.requested_max_frames, bool)
+            or self.requested_max_frames <= 0
+        ):
+            raise DeterministicRolloutError("requested_max_frames must be positive or None")
+        if type(self.source_exhausted) is not bool:
+            raise DeterministicRolloutError("source_exhausted must be boolean")
+        if not math.isfinite(self.reward_sum) or self.reward_sum > 0.0:
+            raise DeterministicRolloutError("reward_sum must be finite and non-positive")
+        if not math.isfinite(self.conditional_risk_sum) or self.conditional_risk_sum < 0:
+            raise DeterministicRolloutError("conditional_risk_sum must be finite and non-negative")
+        if not math.isfinite(self.max_pool_utilization) or self.max_pool_utilization < 0.0:
+            raise DeterministicRolloutError("max_pool_utilization must be finite and non-negative")
+        if len(self.fingerprint) != 64:
+            raise DeterministicRolloutError("fingerprint must be a SHA-256 digest")
+        if self.usable_transitions + self.fallback_transitions != self.transitions:
+            raise DeterministicRolloutError(
+                "usable and fallback counts must partition all transitions"
+            )
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def canonical_policy_name(policy: str) -> str:
+    """Normalize a harness policy name or one fixed contract action."""
+
+    if not isinstance(policy, str) or not policy.strip():
+        raise DeterministicRolloutError("policy must be a non-empty string")
+    normalized = policy.strip().lower().replace("_", "-")
+    if normalized in POLICY_NAMES:
+        return normalized
+    candidate = normalized.upper()
+    try:
+        return action_resources(candidate).name
+    except HybridV2XError as error:
+        fixed = tuple(action.label for action in PolicyAction)
+        raise DeterministicRolloutError(
+            "unknown validation policy",
+            context={"policy": policy, "known": POLICY_NAMES + fixed},
+        ) from error
+
+
+def _select_proposal(
+    *,
+    policy: str,
+    policy_seed: int,
+    trace_id: str,
+    pair_id: str,
+    episode_step: int,
+    allowed_actions: tuple[PolicyAction, ...],
+) -> PolicyAction:
+    if not allowed_actions:
+        raise DeterministicRolloutError("validation policy has no legal action")
+    if policy == POLICY_RANDOM:
+        generator = make_generator(
+            policy_seed,
+            _POLICY_STREAM,
+            trace_id=trace_id,
+            episode_id=pair_id,
+            packet_index=episode_step,
+        )
+        return allowed_actions[int(generator.integers(0, len(allowed_actions)))]
+    if policy == POLICY_CYCLE:
+        return allowed_actions[episode_step % len(allowed_actions)]
+    fixed = action_resources(policy).action
+    if fixed not in allowed_actions:
+        raise DeterministicRolloutError(
+            "fixed validation policy selects a hardware-masked action",
+            context={"policy": policy},
+        )
+    return fixed
+
+
+def _frame_observation(
+    actor_frame: CausalActorFrame,
+    *,
+    schema: FrameAPISchema,
+    action_space: MaskedActionSpace,
+) -> FrameObservation:
+    # Attribute access remains explicit here so this helper cannot accidentally
+    # become a second observation builder; its sole purpose is API validation.
+    rows = actor_frame.rows
+    pair_ids = actor_frame.pair_ids
+    actor = np.zeros((len(rows), schema.actor_width), dtype=np.float32)
+    for row_index, row in enumerate(rows):
+        if row.values is not None:
+            actor[row_index] = np.asarray(row.values, dtype=np.float32)
+    mask_row = np.asarray(action_space.mask.values, dtype=np.bool_)
+    masks = np.tile(mask_row, (len(rows), 1))
+    return FrameObservation(
+        trace_id=actor_frame.trace_id,
+        frame_index=actor_frame.frame_index,
+        time_s=actor_frame.time_s,
+        pair_ids=pair_ids,
+        actor_observations=actor,
+        action_masks=masks,
+    )
+
+
+def _fingerprint_update(digest: _Digest, payload: object) -> None:
+    def numpy_scalar(value: object) -> object:
+        if isinstance(value, np.generic):
+            return value.item()
+        raise TypeError(
+            f"fingerprint payload contains unsupported {type(value).__name__}"
+        )
+
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        default=numpy_scalar,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    digest.update(encoded)
+    digest.update(b"\n")
+
+
+def run_deterministic_rollout(
+    config: ProjectConfig,
+    source: FrameTraceSource,
+    *,
+    policy: str,
+    environment_seed: int | None = None,
+    policy_seed: int = 0,
+    max_frames: int | None = None,
+) -> DeterministicRolloutReport:
+    """Compose and validate one deterministic rollout over a real trace.
+
+    ``max_frames`` is a diagnostic processing cutoff.  It does not manufacture
+    truncation flags for still-active pairs; only trace lifecycle metadata is
+    counted as a training boundary.
+    """
+
+    if not isinstance(config, ProjectConfig):
+        raise DeterministicRolloutError("rollout requires a resolved ProjectConfig")
+    if not isinstance(source, FrameTraceSource):
+        raise DeterministicRolloutError("rollout requires a FrameTraceSource")
+    if max_frames is not None and (
+        not isinstance(max_frames, int) or isinstance(max_frames, bool) or max_frames <= 0
+    ):
+        raise DeterministicRolloutError("max_frames must be positive or None")
+    canonical_policy = canonical_policy_name(policy)
+
+    seed_state = EnvironmentSeedState.from_config(
+        config,
+        reset_seed=environment_seed,
+    )
+    randomness = seed_state.for_trace(source.trace_id)
+    actor_assembler = randomness.actor_assembler(config)
+    physical = build_rollout(
+        config,
+        buildings=(),
+        root_seed=seed_state.active_root_seed,
+        band=SensitivityBand.NOMINAL,
+    )
+    pool_model = RFPoolModel(
+        parameters=physical.lifecycle.rf.collision,
+        sensitivity_band=SensitivityBand.NOMINAL,
+        attempt_airtime_s=config.rf.timing.airtime_s,
+    )
+    reader = PopulationFrameReader(
+        source,
+        generation_period_s=config.service.generation_period_s,
+        expected_config_hash=config_hash(config),
+    )
+    action_space = MaskedActionSpace.from_config(
+        config.environment,
+        config.rf,
+        config.vlc,
+    )
+    api_schema = FrameAPISchema.from_config(config)
+    resource_map = ActionResourceMap.from_config(config.environment, config.cost)
+
+    digest = hashlib.sha256()
+    _fingerprint_update(
+        digest,
+        {
+            "schema": _POLICY_STREAM,
+            "trace_id": source.trace_id,
+            "policy": canonical_policy,
+            "environment_seed": seed_state.active_root_seed,
+            "policy_seed": policy_seed,
+            "max_frames": max_frames,
+        },
+    )
+
+    frames = nonempty_frames = transitions = usable_transitions = 0
+    fallback_transitions = births = natural_terminations = 0
+    internal_truncations = trace_end_truncations = misses = 0
+    reserved_rf_attempts = vlc_activations = max_population = 0
+    reward_terms: list[float] = []
+    conditional_risk_terms: list[float] = []
+    max_pool_utilization = 0.0
+
+    for frame in reader.iter_frames(max_frames=max_frames):
+        actor_frame = actor_assembler.begin_frame(frame)
+        observation = _frame_observation(
+            actor_frame,
+            schema=api_schema,
+            action_space=action_space,
+        )
+        proposals: list[PolicyAction] = []
+        actions_by_pair: dict[str, PolicyAction] = {}
+        for pair, actor_row in zip(frame.pairs, actor_frame.rows, strict=True):
+            proposal = None
+            if actor_row.usable:
+                proposal = _select_proposal(
+                    policy=canonical_policy,
+                    policy_seed=policy_seed,
+                    trace_id=frame.trace_id,
+                    pair_id=pair.pair_id,
+                    episode_step=pair.episode_step,
+                    allowed_actions=action_space.mask.allowed_actions,
+                )
+            selected = action_space.select(
+                proposal,
+                observation_usable=actor_row.usable,
+            )
+            proposals.append(selected)
+            actions_by_pair[pair.pair_id] = selected
+
+        action_array = np.asarray(proposals, dtype=np.int64)
+        api_schema.validate_actions(observation, action_array)
+        ledger = FrameActionLedger.from_frame(
+            frame,
+            actions_by_pair,
+            resource_map=resource_map,
+        )
+        demand = RFPoolDemand.from_ledger(ledger)
+        pool_response = pool_model.evaluate(demand)
+        tapes = randomness.packet_tapes(frame)
+
+        channel_evaluations = {
+            pair.pair_id: physical.evaluate_channels(
+                trace_id=frame.trace_id,
+                pair_id=pair.pair_id,
+                density=source.density,
+                time_s=frame.time_s,
+                transmitter=cast(VehiclePose, pair.transmitter),
+                receiver=cast(VehiclePose, pair.receiver),
+                neighbours=cast(tuple[VehiclePose, ...], frame.vehicles),
+                index_of_frame=frame.spatial_index,
+                vlc_randomness=tapes[pair.pair_id].vlc,
+            )
+            for pair in frame.pairs
+        }
+        rf_risks = {
+            row.pair_id: pool_model.combine_attempt_risk(
+                pool_response,
+                pair_id=row.pair_id,
+                propagation=channel_evaluations[row.pair_id].rf_propagation,
+            )
+            for row in ledger.pair_accounting
+            if row.uses_rf
+        }
+        vlc_results = {
+            row.pair_id: channel_evaluations[row.pair_id].vlc_result
+            for row in ledger.pair_accounting
+            if row.uses_vlc
+        }
+        outcomes = assemble_frame_outcomes(
+            ledger,
+            pool_response,
+            tapes_by_pair=tapes,
+            rf_risks_by_pair=rf_risks,
+            vlc_results_by_pair=vlc_results,
+        )
+        boundary = FrameReturnBoundary.from_frame(ledger, actor_frame)
+        final_references = {
+            pair_id: BootstrapObservationReference(
+                trace_id=frame.trace_id,
+                pair_id=pair_id,
+                next_frame_index=frame.index + 1,
+            )
+            for pair_id in boundary.bootstrap_pair_ids
+        }
+        boundary.as_step_info(final_observation=final_references)
+
+        for outcome in outcomes.pair_outcomes:
+            spec = action_resources(outcome.action)
+            completion_s = max(
+                len(outcome.rf_attempts) * config.rf.timing.airtime_s,
+                config.vlc.timing.airtime_s if spec.uses_vlc else 0.0,
+            )
+            if completion_s > config.service.deadline_s + 1e-12:
+                raise DeterministicRolloutError(
+                    "selected packet completion exceeds the service deadline",
+                    context={
+                        "pair_id": outcome.pair_id,
+                        "completion_s": completion_s,
+                        "deadline_s": config.service.deadline_s,
+                    },
+                )
+            actor_assembler.record_feedback(
+                outcome.pair_id,
+                action=outcome.action,
+                at_s=frame.time_s + completion_s,
+                delivered=outcome.delivered,
+                measurements=randomness.feedback_measurements(
+                    outcome,
+                    tapes[outcome.pair_id],
+                ),
+            )
+        actor_assembler.close_frame(pool_response)
+        for pair_id in boundary.final_pair_ids:
+            physical.release(pair_id)
+
+        frames += 1
+        population = len(frame.pairs)
+        nonempty_frames += int(population > 0)
+        transitions += population
+        usable = sum(actor_frame.usable_mask)
+        usable_transitions += usable
+        fallback_transitions += population - usable
+        births += len(ledger.born_pair_ids)
+        natural_terminations += int(np.count_nonzero(boundary.terminated))
+        internal_truncations += len(boundary.bootstrap_pair_ids)
+        trace_end_truncations += sum(reason == "trace_end" for reason in boundary.end_reasons)
+        misses += int(np.sum(outcomes.sampled_miss_costs, dtype=np.float64))
+        reward_terms.extend(float(value) for value in outcomes.rewards)
+        conditional_risk_terms.extend(
+            float(value) for value in outcomes.conditional_miss_probabilities
+        )
+        reserved_rf_attempts += ledger.total_reserved_rf_attempts
+        vlc_activations += ledger.total_vlc_activations
+        max_population = max(max_population, population)
+        max_pool_utilization = max(
+            max_pool_utilization,
+            pool_response.pool_utilization,
+        )
+
+        _fingerprint_update(
+            digest,
+            {
+                "frame_index": frame.index,
+                "time_s": frame.time_s,
+                "pair_ids": frame.active_pair_ids,
+                "actor_rows": [
+                    None if row.values is None else list(row.values) for row in actor_frame.rows
+                ],
+                "actions": [action.label for action in proposals],
+                "pool": {
+                    "offered_rf_attempts": demand.offered_rf_attempts,
+                    "pool_utilization": pool_response.pool_utilization,
+                    "channel_busy_ratio": pool_response.channel_busy_ratio,
+                    "collision_probability": (pool_response.per_attempt_collision_probability),
+                },
+                "outcomes": [row.as_dict() for row in outcomes.pair_outcomes],
+                "lifecycle": {
+                    "terminated": boundary.terminated.tolist(),
+                    "truncated": boundary.truncated.tolist(),
+                    "bootstrap_valid": boundary.bootstrap_valid.tolist(),
+                    "learn_mask": boundary.learn_mask.tolist(),
+                    "end_reasons": boundary.end_reasons,
+                },
+            },
+        )
+
+    source_exhausted = frames == reader.decision_frame_count
+    return DeterministicRolloutReport(
+        trace_id=source.trace_id,
+        policy=canonical_policy,
+        environment_seed=seed_state.active_root_seed,
+        policy_seed=policy_seed,
+        requested_max_frames=max_frames,
+        available_frames=reader.decision_frame_count,
+        frames=frames,
+        source_exhausted=source_exhausted,
+        nonempty_frames=nonempty_frames,
+        transitions=transitions,
+        usable_transitions=usable_transitions,
+        fallback_transitions=fallback_transitions,
+        births=births,
+        natural_terminations=natural_terminations,
+        internal_truncations=internal_truncations,
+        trace_end_truncations=trace_end_truncations,
+        misses=misses,
+        reward_sum=math.fsum(reward_terms),
+        conditional_risk_sum=math.fsum(conditional_risk_terms),
+        reserved_rf_attempts=reserved_rf_attempts,
+        vlc_activations=vlc_activations,
+        max_population=max_population,
+        max_pool_utilization=max_pool_utilization,
+        fingerprint=digest.hexdigest(),
+    )
+
+
+def trace_source(project_root: str | Path, trace_id: str) -> FrameTraceSource:
+    """Resolve one canonical trace beneath a project for scripts and notebooks."""
+
+    root = Path(project_root).expanduser().resolve()
+    return FrameTraceSource.discover(root / "artifacts" / "traces" / trace_id)
+
+
+__all__ = [
+    "POLICY_CYCLE",
+    "POLICY_NAMES",
+    "POLICY_RANDOM",
+    "BootstrapObservationReference",
+    "DeterministicRolloutError",
+    "DeterministicRolloutReport",
+    "canonical_policy_name",
+    "run_deterministic_rollout",
+    "trace_source",
+]

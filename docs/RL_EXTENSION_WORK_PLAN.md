@@ -377,12 +377,13 @@ The RF-pool response is numerically stable, physically interpretable, monotonic 
 
 ## Phase 5 — Mean-field environment
 
-Status (2026-09-21): **in progress**. The environment boundary is frozen as a
-Gymnasium-shaped multi-agent frame protocol without inheriting from
-``gymnasium.Env``. It preserves ``reset(seed, options)``, the five-part step
-result, separate termination/truncation semantics, and ``close()``, while
-intentionally returning pair-aligned vectors because the active population can
-change between decision frames. ``FrameObservation`` contains only canonical
+Status (2026-09-21): **task checklist complete; one deliverable remains**. The
+environment boundary is frozen as a Gymnasium-shaped multi-agent frame protocol
+without inheriting from ``gymnasium.Env``. It preserves ``reset(seed,
+options)``, the five-part step result, separate termination/truncation
+semantics, and ``close()``, while intentionally returning pair-aligned vectors
+because the active population can change between decision frames.
+``FrameObservation`` contains only canonical
 stable IDs, the ``float32`` decentralized actor matrix, and boolean action
 masks. ``FrameStepOutput`` separately aligns rewards and lifecycle flags to the
 actors that just acted through ``transition_pair_ids``; the next observation
@@ -434,7 +435,17 @@ no row. A physical birth leaves continuing-pair histories and the preceding
 frame's valid delayed population signal intact. The first sampled frame remains
 the documented exception: pairs already underway in the source trace are new
 to the rollout and begin with fresh local history without being relabelled as
-physical births.
+physical births. A deterministic validation harness now composes trace replay,
+causal actor rows, masked random/scripted actions, joint resource accounting,
+the shared RF pool, action-independent physical channels, matched packet tapes,
+selected-action outcomes, feedback, and return boundaries. On the real
+``synthetic-d10-train-000`` artifact, random and cycle policies each completed
+100 frames and 18,810 transitions; a fresh second pass reproduced each complete
+report and fingerprint exactly. The four passes exercised 75,240 transitions
+without an invariant failure. Results and limitations are recorded in
+``docs/PHASE5_DETERMINISTIC_ROLLOUTS.md``. The train-only observation-
+normalization workflow listed under deliverables is still outstanding, so this
+phase is not yet declared fully complete.
 
 ### Objective
 
@@ -473,7 +484,7 @@ Advance to the next population frame
 - [x] Handle pair termination and trace truncation correctly for return estimation.
 - [x] Seed every stochastic component.
 - [x] Add invariant checks for finite values, valid probabilities, valid actions, and legal lifecycle transitions.
-- [ ] Run long deterministic rollouts with random and scripted policies.
+- [x] Run long deterministic rollouts with random and scripted policies.
 
 ### Deliverables
 
@@ -810,5 +821,8 @@ identity. Pair ordering, population size, source ordering, and NumPy global RNG
 state cannot shift those draws. Runtime invariant boundaries now reject
 non-finite targets, invalid probabilities, malformed or masked actions, and
 illegal cross-frame lifecycle transitions before they enter a rollout buffer.
-Implement the next Phase 5 task by running long deterministic rollouts with
-random and scripted policies.
+The Phase 5 task checklist and long-rollout completion gate are complete. Before
+beginning Phase 6, implement the remaining Phase 5 deliverable: a checkpointable
+running-standardization workflow that updates from the training split only,
+freezes for validation/test, preserves excluded categorical/sentinel columns,
+and is mechanically tested against split leakage.
