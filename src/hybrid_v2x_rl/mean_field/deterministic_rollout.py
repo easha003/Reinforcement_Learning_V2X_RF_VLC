@@ -19,6 +19,7 @@ import json
 import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Final, Protocol, cast
 
 import numpy as np
@@ -40,6 +41,11 @@ from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, PopulationFrameReader
 from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizer
 from hybrid_v2x_rl.mean_field.packet_outcomes import assemble_frame_outcomes
+from hybrid_v2x_rl.mean_field.policy_interface import (
+    OracleChannelTruth,
+    PopulationPolicy,
+    PopulationPolicyFrame,
+)
 from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
 from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 from hybrid_v2x_rl.mean_field.seeding import EnvironmentSeedState
@@ -208,6 +214,52 @@ def _select_proposal(
     return fixed
 
 
+@dataclass(frozen=True, slots=True)
+class _DeterministicPolicy:
+    """Adapt the Phase 5 random/cycle/fixed selectors to the shared engine."""
+
+    canonical_name: str
+    policy_seed: int
+
+    @property
+    def name(self) -> str:
+        return self.canonical_name
+
+    @property
+    def requires_oracle_truth(self) -> bool:
+        return False
+
+    def select_actions(
+        self,
+        decision: PopulationPolicyFrame,
+        *,
+        channel_truth: OracleChannelTruth | None,
+    ) -> tuple[PolicyAction | None, ...]:
+        if channel_truth is not None:
+            raise DeterministicRolloutError(
+                "a Phase 5 validation policy cannot receive oracle truth"
+            )
+        return tuple(
+            (
+                _select_proposal(
+                    policy=self.canonical_name,
+                    policy_seed=self.policy_seed,
+                    trace_id=decision.frame.trace_id,
+                    pair_id=pair.pair_id,
+                    episode_step=pair.episode_step,
+                    allowed_actions=decision.action_space.mask.allowed_actions,
+                )
+                if actor_row.usable
+                else None
+            )
+            for pair, actor_row in zip(
+                decision.frame.pairs,
+                decision.actor_frame.rows,
+                strict=True,
+            )
+        )
+
+
 def _fingerprint_update(digest: _Digest, payload: object) -> None:
     def numpy_scalar(value: object) -> object:
         if isinstance(value, np.generic):
@@ -225,16 +277,16 @@ def _fingerprint_update(digest: _Digest, payload: object) -> None:
     digest.update(b"\n")
 
 
-def run_deterministic_rollout(
+def run_policy_rollout(
     config: ProjectConfig,
     source: FrameTraceSource,
     *,
-    policy: str,
+    policy: PopulationPolicy,
     environment_seed: int | None = None,
     policy_seed: int = 0,
     max_frames: int | None = None,
 ) -> DeterministicRolloutReport:
-    """Compose and validate one deterministic rollout over a real trace.
+    """Run any population policy through the one authoritative environment path.
 
     ``max_frames`` is a diagnostic processing cutoff.  It does not manufacture
     truncation flags for still-active pairs; only trace lifecycle metadata is
@@ -245,11 +297,19 @@ def run_deterministic_rollout(
         raise DeterministicRolloutError("rollout requires a resolved ProjectConfig")
     if not isinstance(source, FrameTraceSource):
         raise DeterministicRolloutError("rollout requires a FrameTraceSource")
+    if not isinstance(policy, PopulationPolicy):
+        raise DeterministicRolloutError("rollout requires a PopulationPolicy")
+    if not isinstance(policy.name, str) or not policy.name.strip():
+        raise DeterministicRolloutError("population policy name must be non-empty")
+    if type(policy.requires_oracle_truth) is not bool:
+        raise DeterministicRolloutError(
+            "population policy oracle declaration must be boolean"
+        )
     if max_frames is not None and (
         not isinstance(max_frames, int) or isinstance(max_frames, bool) or max_frames <= 0
     ):
         raise DeterministicRolloutError("max_frames must be positive or None")
-    canonical_policy = canonical_policy_name(policy)
+    canonical_policy = policy.name
 
     seed_state = EnvironmentSeedState.from_config(
         config,
@@ -306,19 +366,50 @@ def run_deterministic_rollout(
         actor_frame = actor_assembler.begin_frame(frame)
         normalized_frame = normalizer.begin_frame(frame, actor_frame)
         observation = normalized_frame.observation
+        tapes = randomness.packet_tapes(frame)
+        # Physical truth is action-independent and may be materialized before
+        # the joint decision.  It crosses the policy boundary only for the
+        # explicitly non-deployable oracle; deployable policies receive None.
+        channel_evaluations = {
+            pair.pair_id: physical.evaluate_channels(
+                trace_id=frame.trace_id,
+                pair_id=pair.pair_id,
+                density=source.density,
+                time_s=frame.time_s,
+                transmitter=cast(VehiclePose, pair.transmitter),
+                receiver=cast(VehiclePose, pair.receiver),
+                neighbours=cast(tuple[VehiclePose, ...], frame.vehicles),
+                index_of_frame=frame.spatial_index,
+                vlc_randomness=tapes[pair.pair_id].vlc,
+            )
+            for pair in frame.pairs
+        }
+        decision = PopulationPolicyFrame(
+            frame=frame,
+            actor_frame=actor_frame,
+            observation=observation,
+            action_space=action_space,
+            resource_map=resource_map,
+            pool_model=pool_model,
+            miss_budget=config.service.miss_budget,
+        )
+        visible_truth: OracleChannelTruth | None = None
+        if policy.requires_oracle_truth:
+            visible_truth = MappingProxyType(channel_evaluations)
+        proposed = policy.select_actions(decision, channel_truth=visible_truth)
+        if not isinstance(proposed, tuple) or len(proposed) != len(frame.pairs):
+            raise DeterministicRolloutError(
+                "policy proposals must be a pair-aligned tuple",
+                context={"actual": len(proposed), "expected": len(frame.pairs)},
+            )
         proposals: list[PolicyAction] = []
         actions_by_pair: dict[str, PolicyAction] = {}
-        for pair, actor_row in zip(frame.pairs, actor_frame.rows, strict=True):
-            proposal = None
-            if actor_row.usable:
-                proposal = _select_proposal(
-                    policy=canonical_policy,
-                    policy_seed=policy_seed,
-                    trace_id=frame.trace_id,
-                    pair_id=pair.pair_id,
-                    episode_step=pair.episode_step,
-                    allowed_actions=action_space.mask.allowed_actions,
-                )
+        for pair, actor_row, proposal in zip(
+            frame.pairs,
+            actor_frame.rows,
+            proposed,
+            strict=True,
+        ):
             selected = action_space.select(
                 proposal,
                 observation_usable=actor_row.usable,
@@ -335,22 +426,6 @@ def run_deterministic_rollout(
         )
         demand = RFPoolDemand.from_ledger(ledger)
         pool_response = pool_model.evaluate(demand)
-        tapes = randomness.packet_tapes(frame)
-
-        channel_evaluations = {
-            pair.pair_id: physical.evaluate_channels(
-                trace_id=frame.trace_id,
-                pair_id=pair.pair_id,
-                density=source.density,
-                time_s=frame.time_s,
-                transmitter=cast(VehiclePose, pair.transmitter),
-                receiver=cast(VehiclePose, pair.receiver),
-                neighbours=cast(tuple[VehiclePose, ...], frame.vehicles),
-                index_of_frame=frame.spatial_index,
-                vlc_randomness=tapes[pair.pair_id].vlc,
-            )
-            for pair in frame.pairs
-        }
         rf_risks = {
             row.pair_id: pool_model.combine_attempt_risk(
                 pool_response,
@@ -497,6 +572,28 @@ def run_deterministic_rollout(
     )
 
 
+def run_deterministic_rollout(
+    config: ProjectConfig,
+    source: FrameTraceSource,
+    *,
+    policy: str,
+    environment_seed: int | None = None,
+    policy_seed: int = 0,
+    max_frames: int | None = None,
+) -> DeterministicRolloutReport:
+    """Run a Phase 5 random, cycle, or fixed-action validation policy."""
+
+    canonical = canonical_policy_name(policy)
+    return run_policy_rollout(
+        config,
+        source,
+        policy=_DeterministicPolicy(canonical, policy_seed),
+        environment_seed=environment_seed,
+        policy_seed=policy_seed,
+        max_frames=max_frames,
+    )
+
+
 def trace_source(project_root: str | Path, trace_id: str) -> FrameTraceSource:
     """Resolve one canonical trace beneath a project for scripts and notebooks."""
 
@@ -513,5 +610,6 @@ __all__ = [
     "DeterministicRolloutReport",
     "canonical_policy_name",
     "run_deterministic_rollout",
+    "run_policy_rollout",
     "trace_source",
 ]

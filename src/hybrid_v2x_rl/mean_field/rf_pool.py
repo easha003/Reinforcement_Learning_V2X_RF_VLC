@@ -548,6 +548,47 @@ class RFPoolModel:
             per_attempt_collision_probability=collision,
         )
 
+    @staticmethod
+    def demand_from_ledger(ledger: FrameActionLedger) -> RFPoolDemand:
+        """Use the authoritative ledger-to-demand adapter for provisional policies."""
+
+        return RFPoolDemand.from_ledger(ledger)
+
+    def access_failure_probability(self, response: RFPoolResponse) -> float:
+        """Return current collision-plus-half-duplex risk before RF decoding.
+
+        Analytical allocators need this quantity for candidate actions without
+        inventing an RF propagation result.  Keeping it on the pool model also
+        ensures the allocator and realized packet path use identical access
+        arithmetic.
+        """
+
+        if not isinstance(response, RFPoolResponse):
+            raise RFPoolError("access risk requires a validated RF-pool response")
+        if (
+            response.sensitivity_band is not self.sensitivity_band
+            or response.parameters != self.attempt_parameters
+        ):
+            raise RFPoolError(
+                "RF-pool response was not produced by this model",
+                context={"sensitivity_band": response.sensitivity_band.value},
+            )
+        mean_attempts = (
+            response.demand.offered_rf_attempts / response.demand.active_pairs
+            if response.demand.active_pairs
+            else 0.0
+        )
+        mean_committed_airtime_s = mean_attempts * response.attempt_airtime_s
+        half_duplex = (
+            half_duplex_probability(
+                replace(response.parameters, airtime_s=mean_committed_airtime_s)
+            )
+            if mean_committed_airtime_s > 0.0
+            else 0.0
+        )
+        collision = response.per_attempt_collision_probability
+        return 1.0 - (1.0 - collision) * (1.0 - half_duplex)
+
     def combine_attempt_risk(
         self,
         response: RFPoolResponse,
@@ -589,15 +630,12 @@ class RFPoolModel:
                 context={"pair_id": pair_id},
             )
 
-        mean_attempts = (
-            response.demand.offered_rf_attempts / response.demand.active_pairs
-        )
+        mean_attempts = response.demand.offered_rf_attempts / response.demand.active_pairs
         mean_committed_airtime_s = mean_attempts * response.attempt_airtime_s
         half_duplex = half_duplex_probability(
             replace(response.parameters, airtime_s=mean_committed_airtime_s)
         )
-        collision = response.per_attempt_collision_probability
-        access = 1.0 - (1.0 - collision) * (1.0 - half_duplex)
+        access = self.access_failure_probability(response)
         decoding = propagation.decoding_failure_probability
         total = 1.0 - (1.0 - access) * (1.0 - decoding)
         return RFAttemptRisk(

@@ -238,6 +238,25 @@ def test_pool_model_counts_each_reserved_attempt_once() -> None:
     assert model.attempt_parameters.rf_usage_fraction == 1.0
 
 
+def test_analytical_access_risk_reuses_ledger_boundary_and_handles_zero_load() -> None:
+    model = _model()
+    vlc_ledger = _ledger((PolicyAction.VLC, PolicyAction.VLC))
+    zero_response = model.evaluate(model.demand_from_ledger(vlc_ledger))
+
+    assert model.demand_from_ledger(vlc_ledger) == RFPoolDemand.from_ledger(vlc_ledger)
+    assert model.access_failure_probability(zero_response) == 0.0
+
+    loaded_response = model.evaluate(_demand_with_total_attempts(20))
+    attempt = model.combine_attempt_risk(
+        loaded_response,
+        pair_id="pair-000",
+        propagation=_propagation(),
+    )
+    assert model.access_failure_probability(loaded_response) == pytest.approx(
+        attempt.access_failure_probability
+    )
+
+
 @pytest.mark.parametrize(
     (
         "offered_rf_attempts",
