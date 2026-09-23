@@ -36,11 +36,11 @@ reward/cost values are detached and copied into a `LifecycleBootstrapBatch`.
 All value tensors share shape, dtype, and device; zero-bootstrap rows are
 validated to contain exact zeros.
 
-The adapter accepts already evaluated final-observation critic values because
-the critic network is introduced with the PPO update task. This keeps value
-source selection independently testable: the later rollout collector must
-evaluate `info["final_observation"]` before reset and submit predictions under
-the same stable IDs.
+The adapter accepts already evaluated final-observation critic values from the
+separate reward and cost networks implemented in `PHASE7_PPO_UPDATES.md`. This
+keeps value-source selection independently testable: the later rollout
+collector must evaluate `info["final_observation"]` before reset and submit
+predictions under the same stable IDs.
 
 ## Verification
 

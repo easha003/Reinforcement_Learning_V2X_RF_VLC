@@ -45,5 +45,5 @@ Unit tests cover broadcast and row-specific masks, zero probability and zero
 gradient for masked logits, deterministic tie-breaking, reproducible sampling,
 canonical `ActionMask` indices, analytical probabilities/log probabilities and
 entropy, malformed inputs, empty populations, and the configured two-by-64
-tanh actor shape. Reward/cost advantages and PPO optimization remain separate
-Phase 7 tasks.
+tanh actor shape. Reward/cost advantages and clipped PPO optimization are
+implemented at their separate documented Phase 7 boundaries.

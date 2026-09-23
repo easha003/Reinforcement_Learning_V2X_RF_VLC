@@ -582,7 +582,7 @@ Implement a shared categorical policy that minimizes activation cost while learn
 - [x] Implement masked categorical action sampling and deterministic evaluation.
 - [x] Implement reward and cost generalized advantage estimation.
 - [x] Distinguish true terminations from trace/time-limit truncations during bootstrapping.
-- [ ] Implement PPO clipped actor and critic updates.
+- [x] Implement PPO clipped actor and critic updates.
 - [ ] Implement per-density dual ascent with nonnegative projection.
 - [ ] Decide and document whether the actor uses sampled binary costs, conditional risk, or a staged combination.
 - [ ] Log policy loss, value losses, entropy, KL divergence, clip fraction, explained variance, constraint estimates, and dual variables.
@@ -593,7 +593,7 @@ Implement a shared categorical policy that minimizes activation cost while learn
 
 - [x] GAE across termination and truncation boundaries
 - [x] Cost-advantage and reward-advantage separation
-- [ ] PPO clipping behavior
+- [x] PPO clipping behavior
 - [x] Action-mask correctness
 - [ ] Dual update increases after violation and decreases/stays projected at zero after slack
 - [ ] Density-to-dual assignment
