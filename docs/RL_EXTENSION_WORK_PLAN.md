@@ -536,7 +536,7 @@ Establish whether RL has a genuine opportunity and define the comparisons requir
 - [x] Verify expected ordering in simple/limiting scenarios.
 - [x] Report reliability and resource metrics at each density.
 - [x] Measure the gap between the best deployable baseline and oracle.
-- [ ] Test whether link history or population coupling creates a sequential advantage over contextual selection.
+- [x] Test whether link history or population coupling creates a sequential advantage over contextual selection.
 
 ### RL go/no-go gate
 
@@ -837,6 +837,10 @@ non-finite targets, invalid probabilities, malformed or masked actions, and
 illegal cross-frame lifecycle transitions before they enter a rollout buffer.
 Phase 5 is complete: its task checklist, deliverables, invariant suite,
 normalization leakage checks, checkpoint-state round trip, and long-rollout
-completion gate all pass. Begin Phase 6 by implementing every required baseline
-through the same normalized environment, action accounting, RF-pool, matched
-randomness, outcome, and lifecycle path.
+completion gate all pass. Phase 6 is also complete: every required baseline
+runs through the shared path with matched randomness, reliability-first density
+metrics, a guarded deployable-to-oracle comparison, and a sequential-opportunity
+report. The complete held-out population evidence produces a Phase 6 PPO gate
+decision of `go`; the bounded history sample remains diagnostic. Begin Phase 7
+with the independently tested rollout buffer, return estimators, cost critic,
+and dual update before assembling the full PPO training loop.
