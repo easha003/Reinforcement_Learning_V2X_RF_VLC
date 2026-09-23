@@ -34,11 +34,11 @@ bootstrap can be used while recursive GAE still stops at a reset. The caller
 also supplies `next_values` explicitly so a boundary value never has to be
 reconstructed from a post-reset observation.
 
-This task implements and tests the numerical two-mask kernel. The next Phase 7
-task will bind termination, truncation, bootstrap validity, stable pair IDs,
-and final-observation critic evaluations to these inputs. The work-plan test
-for GAE across concrete termination/truncation cases therefore remains open
-until that lifecycle adapter is present.
+This task implements and tests the numerical two-mask kernel. The companion
+`PHASE7_LIFECYCLE_BOOTSTRAP.md` adapter now binds termination, truncation,
+bootstrap validity, stable pair IDs, and separately evaluated final-observation
+critic values to these inputs and tests GAE across all concrete lifecycle
+cases.
 
 ## Variable populations
 
