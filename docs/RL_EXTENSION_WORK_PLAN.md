@@ -535,7 +535,7 @@ Establish whether RL has a genuine opportunity and define the comparisons requir
 - [x] Use matched trace splits and matched random numbers for policy comparison.
 - [x] Verify expected ordering in simple/limiting scenarios.
 - [x] Report reliability and resource metrics at each density.
-- [ ] Measure the gap between the best deployable baseline and oracle.
+- [x] Measure the gap between the best deployable baseline and oracle.
 - [ ] Test whether link history or population coupling creates a sequential advantage over contextual selection.
 
 ### RL go/no-go gate

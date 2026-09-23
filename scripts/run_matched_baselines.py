@@ -23,6 +23,7 @@ from hybrid_v2x_rl.mean_field.baselines import (
 from hybrid_v2x_rl.mean_field.density_metrics import build_density_metrics_report
 from hybrid_v2x_rl.mean_field.frames import TraceCatalog
 from hybrid_v2x_rl.mean_field.matched_campaign import run_matched_policy_campaign
+from hybrid_v2x_rl.mean_field.oracle_gap import build_oracle_gap_report
 
 DEFAULT_POLICIES = (
     *BASELINE_ALWAYS_RF,
@@ -87,6 +88,14 @@ def _parser() -> argparse.ArgumentParser:
         help="override the configured trajectory-cluster bootstrap count",
     )
     parser.add_argument("--bootstrap-seed", type=int, default=0)
+    parser.add_argument(
+        "--oracle-gap-out",
+        type=Path,
+        help=(
+            "also select the strongest reliable deployable baseline and write "
+            "its paired gap to the truth-risk oracle; requires the complete suite"
+        ),
+    )
     return parser
 
 
@@ -107,8 +116,13 @@ def main() -> int:
         config.paths.trace_root,
         config.environment.splits,
     )
-    names = tuple(args.policies or DEFAULT_POLICIES)
     estimator = _load_estimator(args.estimator)
+    if args.policies:
+        names = tuple(args.policies)
+    elif estimator is None:
+        names = DEFAULT_POLICIES
+    else:
+        names = (*DEFAULT_POLICIES[:-1], BASELINE_SUPERVISED, DEFAULT_POLICIES[-1])
     if BASELINE_SUPERVISED in names and estimator is None:
         raise ValueError(
             "supervised-risk-allocation requires --estimator fitted on training traces"
@@ -151,10 +165,8 @@ def main() -> int:
         if not ordering.passed:
             exit_code = 1
 
-    if args.density_out is not None:
-        density_output = args.density_out.expanduser()
-        if not density_output.is_absolute():
-            density_output = project_root / density_output
+    density_report = None
+    if args.density_out is not None or args.oracle_gap_out is not None:
         density_report = build_density_metrics_report(
             config,
             campaign,
@@ -162,12 +174,30 @@ def main() -> int:
             bootstrap_replicates=args.bootstrap_replicates,
             bootstrap_seed=args.bootstrap_seed,
         )
+    if args.density_out is not None:
+        density_output = args.density_out.expanduser()
+        if not density_output.is_absolute():
+            density_output = project_root / density_output
+        assert density_report is not None
         density_report.write_json(density_output)
         print(
             f"density metrics: densities={len(density_report.densities)} "
             f"evaluation_ready={density_report.evaluation_ready}"
         )
         print(f"wrote {density_output}")
+
+    if args.oracle_gap_out is not None:
+        gap_output = args.oracle_gap_out.expanduser()
+        if not gap_output.is_absolute():
+            gap_output = project_root / gap_output
+        assert density_report is not None
+        gap_report = build_oracle_gap_report(config, campaign, density_report)
+        gap_report.write_json(gap_output)
+        print(
+            f"oracle gap: comparison_ready={gap_report.comparison_ready} "
+            f"all_densities_comparable={gap_report.all_densities_comparable}"
+        )
+        print(f"wrote {gap_output}")
     return exit_code
 
 
