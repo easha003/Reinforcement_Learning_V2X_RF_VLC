@@ -27,9 +27,11 @@ loss_actor = -L_clip - entropy_coefficient * mean(entropy)
 ```
 
 `weight_cost` is an externally supplied, nonnegative, detached value for each
-row. The next Phase 7 task owns its density-to-dual assignment and projected
-ascent update. Keeping that state outside this module makes clipping behavior
-testable before dual dynamics are introduced.
+row. `agents.dual_ascent.PerDensityDualAscent` now owns its exact
+density-to-dual assignment and projected ascent update. Keeping that state
+outside this module separates the once-per-rollout constraint estimate from
+the epoch/minibatch PPO updates and keeps clipping behavior independently
+testable.
 
 Advantages are not silently normalized. Reward and reliability cost have
 declared physical meanings, and an unversioned normalization choice would
