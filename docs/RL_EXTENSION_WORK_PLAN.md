@@ -598,7 +598,7 @@ Implement a shared categorical policy that minimizes activation cost while learn
 - [x] Dual update increases after violation and decreases/stays projected at zero after slack
 - [x] Density-to-dual assignment
 - [x] Checkpoint save/restore
-- [ ] Tiny learnable environment convergence
+- [x] Tiny learnable environment convergence
 
 ### Deliverables
 
@@ -841,6 +841,8 @@ completion gate all pass. Phase 6 is also complete: every required baseline
 runs through the shared path with matched randomness, reliability-first density
 metrics, a guarded deployable-to-oracle comparison, and a sequential-opportunity
 report. The complete held-out population evidence produces a Phase 6 PPO gate
-decision of `go`; the bounded history sample remains diagnostic. Begin Phase 7
-with the independently tested rollout buffer, return estimators, cost critic,
-and dual update before assembling the full PPO training loop.
+decision of `go`; the bounded history sample remains diagnostic. Phase 7 is
+complete: the independently tested actor, critics, estimators, PPO updater,
+dual ascent, metrics, and complete checkpoint state now pass an end-to-end
+tiny-CMDP test whose constrained and reward-only optima disagree. Begin Phase 8
+with short smoke training on one trace and one traffic density.
