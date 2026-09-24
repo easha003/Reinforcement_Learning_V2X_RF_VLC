@@ -194,6 +194,56 @@ class PerDensityDualAscent:
             update_counts=tuple(self._update_counts),
         )
 
+    def restore(self, snapshot: DensityDualSnapshot) -> None:
+        """Atomically restore multiplier values and update counters.
+
+        The receiver's configured density definitions remain authoritative.
+        Checkpoint state may change only the mutable multiplier and counter
+        arrays, and every proposed value is validated before either array is
+        replaced.
+        """
+
+        if not isinstance(snapshot, DensityDualSnapshot):
+            raise DualAscentError("dual restoration requires a DensityDualSnapshot")
+        expected_densities = self.densities_veh_per_lane_km
+        if snapshot.densities_veh_per_lane_km != expected_densities:
+            raise DualAscentError(
+                "checkpoint dual densities do not match configured densities",
+                context={
+                    "checkpoint": snapshot.densities_veh_per_lane_km,
+                    "configured": expected_densities,
+                },
+            )
+        width = len(self._definitions)
+        if len(snapshot.multipliers) != width or len(snapshot.update_counts) != width:
+            raise DualAscentError("checkpoint dual arrays are not density-aligned")
+
+        multipliers: list[float] = []
+        update_counts: list[int] = []
+        for definition, multiplier, updates in zip(
+            self._definitions,
+            snapshot.multipliers,
+            snapshot.update_counts,
+            strict=True,
+        ):
+            restored = _nonnegative_real("checkpoint multiplier", multiplier)
+            if restored > definition.maximum:
+                raise DualAscentError(
+                    "checkpoint dual multiplier exceeds its configured maximum",
+                    context={
+                        "density_veh_per_lane_km": definition.density_veh_per_lane_km,
+                        "multiplier": restored,
+                        "maximum": definition.maximum,
+                    },
+                )
+            if not isinstance(updates, int) or isinstance(updates, bool) or updates < 0:
+                raise DualAscentError("checkpoint dual update counts must be nonnegative integers")
+            multipliers.append(restored)
+            update_counts.append(updates)
+
+        self._multipliers = multipliers
+        self._update_counts = update_counts
+
     def multiplier_for_density(self, density_veh_per_lane_km: float) -> float:
         """Return the multiplier for an exact configured density label."""
 

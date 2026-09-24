@@ -587,7 +587,7 @@ Implement a shared categorical policy that minimizes activation cost while learn
 - [x] Decide and document whether the actor uses sampled binary costs, conditional risk, or a staged combination.
 - [x] Log policy loss, value losses, entropy, KL divergence, clip fraction, explained variance, constraint estimates, and dual variables.
 - [x] Save model, optimizers, duals, normalization state, configuration, seed state, and training counters in checkpoints.
-- [ ] Restore a checkpoint and verify bitwise-identical deterministic actions where practical.
+- [x] Restore a checkpoint and verify bitwise-identical deterministic actions where practical.
 
 ### Required tests
 
@@ -597,7 +597,7 @@ Implement a shared categorical policy that minimizes activation cost while learn
 - [x] Action-mask correctness
 - [x] Dual update increases after violation and decreases/stays projected at zero after slack
 - [x] Density-to-dual assignment
-- [ ] Checkpoint save/restore
+- [x] Checkpoint save/restore
 - [ ] Tiny learnable environment convergence
 
 ### Deliverables

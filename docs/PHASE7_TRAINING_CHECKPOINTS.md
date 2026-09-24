@@ -47,6 +47,12 @@ instead of being inferred later from weight shapes.  The full canonical
 configuration is embedded for auditability; its hash binds later restoration
 to the intended run.
 
+Restoration compares both.  The digest catches ordinary physics/training
+drift, while exact canonical comparison also catches fields intentionally
+excluded from the artifact hash, such as trace-split membership.  A checkpoint
+therefore cannot silently resume against a different training, validation, or
+test partition even when the run digest is unchanged.
+
 ## Random state
 
 The training driver must pass every live explicit NumPy and PyTorch generator.
@@ -54,6 +60,8 @@ Empty generator maps are rejected so a caller cannot silently produce a
 nominally resumable checkpoint without policy/minibatch or environment stream
 positions.  Generator names are stored in sorted order.  Global Python, legacy
 NumPy, PyTorch CPU, and available accelerator RNG states are also captured.
+Named NumPy streams must use the project's declared PCG64 bit generator, so
+every checkpoint accepted by the saver is also supported by the loader.
 
 The project creates NumPy streams from stable experiment identities, but their
 current bit-generator positions still matter when saving inside a continuing
@@ -73,9 +81,45 @@ and publish it atomically as a hard link.  Existing paths and symlinks are
 rejected: iteration checkpoints are immutable evidence, not mutable “latest”
 files.  The returned summary reports byte length and an artifact SHA-256.
 
-Restoration and deterministic-action parity are the next Phase 7 task.  Until
-that loader is implemented, callers may inspect this format with weights-only
-loading but must not manually mutate live training components from it.
+## Restoration
+
+`agents.checkpointing.restore_training_checkpoint` reads only regular,
+non-symlink files through `torch.load(..., weights_only=True)`.  Callers may
+supply the SHA-256 returned by the saver; any byte-level mismatch is rejected
+before state construction.  The loader validates exact top-level and nested
+schemas, configuration and seed identity, network dimensions, model tensor
+keys and shapes, optimizer parameter groups and steps, dual projection bounds,
+normalization metadata, counters, and RNG representations.
+
+Only after all primitive state has been parsed does the loader construct new
+training owners.  It rebuilds the PPO updater from the resolved configuration,
+loads all three networks and Adam optimizers, restores the density controller
+through its public atomic restore boundary, and rebuilds the normalizer and
+named generators.  The resulting `RestoredTrainingState` exposes those owners,
+the counters and policy seed, checkpoint/software identity, and read-only maps
+of mutable named RNG objects.
+
+The destination device is explicit and defaults to CPU.  CPU, CUDA, and MPS
+are accepted only when available; named generator states retain their original
+device because random algorithms are not assumed portable across backends.
+Unavailable saved global accelerator states are retained as artifact evidence
+but are installed only when that backend exists.
+
+Global RNG installation is transactional.  Model reconstruction necessarily
+uses PyTorch's CPU generator, so the loader snapshots the caller's global
+Python, NumPy, CPU, and available accelerator states first.  On any failure it
+restores those entry states.  A successful call installs checkpoint globals by
+default; `restore_global_rng=False` reconstructs the training objects while
+leaving the caller's globals unchanged.
+
+## Deterministic parity
+
+The round-trip test evaluates a mixed-mask actor probe before saving and after
+restoring on CPU.  Logits, selected action indices, selected log probabilities,
+and entropies are required to be bitwise equal.  It also compares complete
+optimizer state, reproduces the next named NumPy and PyTorch draws, applies the
+same next PPO minibatch to the original and restored learners, and requires
+identical metrics and resulting parameters.
 
 ## Tests
 
@@ -83,4 +127,7 @@ Unit tests create non-empty Adam state, advance one density dual and named RNG
 streams, save a checkpoint, and verify every required section.  They also prove
 CPU portability, weights-only readability, immutable destination behavior,
 configuration/seed drift rejection, explicit-generator requirements, and
-counter/optimizer invariants.
+counter/optimizer invariants.  Restore tests add exact deterministic-action and
+next-update parity, named and global RNG continuation, exact split binding,
+artifact-digest rejection, malformed-model rejection, and proof that a failed
+restore leaves global RNG state unchanged.

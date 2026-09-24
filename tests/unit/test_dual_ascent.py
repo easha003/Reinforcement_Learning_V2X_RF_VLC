@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from hybrid_v2x_rl.agents.dual_ascent import (
+    DensityDualSnapshot,
     DualAscentError,
     PerDensityDualAscent,
     projected_dual_ascent,
@@ -114,6 +115,30 @@ def test_zero_multiplier_stays_projected_at_zero_under_slack() -> None:
     assert report.for_density(10.0).multiplier_before == 0.0
     assert report.for_density(10.0).multiplier_after == 0.0
     assert controller.multiplier_for_density(10.0) == 0.0
+
+
+def test_restore_replaces_complete_dual_state_and_fails_atomically() -> None:
+    source = _controller()
+    source.update(
+        densities_veh_per_lane_km=torch.tensor([10.0, 20.0]),
+        costs=torch.tensor([0.8, 0.0]),
+        miss_budget=0.2,
+    )
+    restored = _controller()
+
+    restored.restore(source.snapshot())
+
+    assert restored.snapshot() == source.snapshot()
+    before = restored.snapshot()
+    with pytest.raises(DualAscentError, match="exceeds"):
+        restored.restore(
+            DensityDualSnapshot(
+                densities_veh_per_lane_km=before.densities_veh_per_lane_km,
+                multipliers=(3.0, *before.multipliers[1:]),
+                update_counts=before.update_counts,
+            )
+        )
+    assert restored.snapshot() == before
 
 
 def test_penalty_weights_follow_row_density_not_batch_order() -> None:
