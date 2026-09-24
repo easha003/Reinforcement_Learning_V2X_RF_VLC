@@ -238,6 +238,7 @@ class PPOLossTerms:
 class PPOUpdateMetrics:
     """Detached scalar result from one optimizer step."""
 
+    minibatch_size: int
     actor_loss: float
     policy_loss: float
     reward_value_loss: float
@@ -246,6 +247,41 @@ class PPOUpdateMetrics:
     approximate_kl: float
     clip_fraction: float
     ratio_mean: float
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.minibatch_size, int)
+            or isinstance(self.minibatch_size, bool)
+            or self.minibatch_size <= 0
+        ):
+            raise PPOError("PPO metric minibatch_size must be a positive integer")
+        values = {
+            name: _validate_finite_metric(name, getattr(self, name))
+            for name in (
+                "actor_loss",
+                "policy_loss",
+                "reward_value_loss",
+                "cost_value_loss",
+                "entropy",
+                "approximate_kl",
+                "clip_fraction",
+                "ratio_mean",
+            )
+        }
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
+        if self.reward_value_loss < 0.0 or self.cost_value_loss < 0.0:
+            raise PPOError("PPO value-loss metrics must be nonnegative")
+        if self.entropy < 0.0:
+            raise PPOError("PPO entropy metric must be nonnegative")
+        if self.approximate_kl < -1e-7:
+            raise PPOError("PPO approximate KL metric must be nonnegative")
+        if self.approximate_kl < 0.0:
+            object.__setattr__(self, "approximate_kl", 0.0)
+        if not 0.0 <= self.clip_fraction <= 1.0:
+            raise PPOError("PPO clip-fraction metric must lie in [0, 1]")
+        if self.ratio_mean <= 0.0:
+            raise PPOError("PPO probability-ratio mean must be positive")
 
 
 def clipped_policy_surrogate(
@@ -488,6 +524,7 @@ class PPOUpdater:
         _require_finite_parameters("reward critic", self.reward_critic)
         _require_finite_parameters("cost critic", self.cost_critic)
         return PPOUpdateMetrics(
+            minibatch_size=batch.batch_size,
             actor_loss=float(losses.actor_loss.detach().item()),
             policy_loss=float(losses.policy_loss.detach().item()),
             reward_value_loss=float(losses.reward_value_loss.detach().item()),
@@ -541,6 +578,12 @@ def _validate_loss_vector(
             raise PPOError(f"{name} must match the reference device")
     if not bool(torch.isfinite(values).all().item()):
         raise PPOError(f"{name} contains a non-finite value")
+
+
+def _validate_finite_metric(name: str, value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+        raise PPOError(f"{name} metric must be finite")
+    return float(value)
 
 
 def _validate_width(name: str, value: int) -> None:

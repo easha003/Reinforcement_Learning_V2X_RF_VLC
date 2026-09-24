@@ -50,8 +50,10 @@ hyperparameter.
 
 All three losses are evaluated before mutation, all gradients are checked for
 finiteness, and only then are the three optimizer steps applied. Returned
-metrics are pre-update scalars. Persistent metric logging, explained variance,
-checkpoint state, epoch/minibatch scheduling, and early stopping remain later
+metrics are pre-update scalars tagged with their actual minibatch row count.
+`agents.training_metrics` now row-weights them across update epochs and adds
+rollout-level explained variance plus per-density constraint/dual diagnostics.
+Checkpoint state, epoch/minibatch scheduling, and early stopping remain later
 tasks.
 
 ## Verification

@@ -54,4 +54,5 @@ per-density update counts for later checkpoint integration.
 Unit tests cover violation and slack directions, the zero floor and configured
 cap, independent within-density estimates, unchanged absent densities, exact
 row-to-multiplier assignment, headline-configuration construction, detached
-tensor behavior, and fail-closed atomic validation.
+tensor behavior, and fail-closed atomic validation.  The immutable update report
+and resulting snapshot now feed the versioned Phase 7 training-metrics record.

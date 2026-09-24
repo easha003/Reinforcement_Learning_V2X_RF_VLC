@@ -235,6 +235,7 @@ def test_one_update_changes_actor_and_both_critics() -> None:
     )
     assert metrics.approximate_kl == pytest.approx(0.0, abs=1e-6)
     assert metrics.clip_fraction == pytest.approx(0.0)
+    assert metrics.minibatch_size == batch.batch_size
     assert all(math.isfinite(value) for value in astuple(metrics))
 
 
