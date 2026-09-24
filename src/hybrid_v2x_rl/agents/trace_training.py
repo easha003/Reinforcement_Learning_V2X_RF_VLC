@@ -17,8 +17,9 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from types import MappingProxyType
-from typing import Final
+from typing import Final, Protocol
 
 import numpy as np
 import torch
@@ -64,6 +65,14 @@ from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
 
 TRACE_SMOKE_REPORT_SCHEMA: Final = "hybrid-rf-vlc-rl.trace-smoke-training.v1"
 TRACE_SMOKE_POLICY_NAME: Final = "primal-dual-ppo-smoke"
+TRACE_TRAINING_STAGE_NAMES: Final = (
+    "setup",
+    "rollout",
+    "rollout_preparation",
+    "ppo_optimization",
+    "metrics_and_dual",
+    "artifact_publication",
+)
 _ACTION_STREAM_XOR: Final = 0xA17C_10A5_5EED_0001
 _MINIBATCH_STREAM_XOR: Final = 0xB47C_10A5_5EED_0002
 _NUMPY_STREAM_XOR: Final = 0xC57C_10A5_5EED_0003
@@ -94,6 +103,12 @@ _ENVIRONMENT_REPORT_FIELDS: Final = (
 
 class TraceTrainingError(HybridV2XError):
     """A trace-backed smoke-training request or rollout is invalid."""
+
+
+class TraceTrainingTimingObserver(Protocol):
+    """Receive non-overlapping wall-clock measurements from one training run."""
+
+    def record_stage(self, *, name: str, elapsed_seconds: float) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +320,7 @@ def run_trace_smoke_training(
     policy_seed: int = 1001,
     environment_seed: int | None = None,
     max_frames: int = 5,
+    timing_observer: TraceTrainingTimingObserver | None = None,
 ) -> TraceSmokeTrainingResult:
     """Run one real-trace primal-dual PPO iteration and publish its artifacts.
 
@@ -320,6 +336,10 @@ def run_trace_smoke_training(
         policy_seed=policy_seed,
         max_frames=max_frames,
     )
+    if timing_observer is not None and not callable(getattr(timing_observer, "record_stage", None)):
+        raise TraceTrainingError("timing_observer must provide a record_stage method")
+
+    stage_started = perf_counter()
     destination = _prepare_output_root(output_root)
     random.seed(policy_seed)
     np.random.seed(policy_seed % (2**32))
@@ -342,6 +362,9 @@ def run_trace_smoke_training(
         updater=updater,
         action_generator=action_generator,
     )
+    _record_stage(timing_observer, "setup", stage_started)
+
+    stage_started = perf_counter()
     rollout_result = run_policy_rollout_with_state(
         config,
         source,
@@ -351,6 +374,7 @@ def run_trace_smoke_training(
         max_frames=max_frames,
         frame_observer=collector,
     )
+    _record_stage(timing_observer, "rollout", stage_started)
     frames = collector.frames
     if len(frames) != max_frames:
         raise TraceTrainingError(
@@ -359,12 +383,16 @@ def run_trace_smoke_training(
         )
 
     miss_budget = config.training.curriculum[0].miss_budget
+    stage_started = perf_counter()
     prepared = _prepare_rollout(
         frames=frames,
         config=config,
         dual_ascent=dual_ascent,
         density_veh_per_lane_km=source.density,
     )
+    _record_stage(timing_observer, "rollout_preparation", stage_started)
+
+    stage_started = perf_counter()
     update_metrics = _optimize(
         updater=updater,
         batch=prepared.batch,
@@ -372,6 +400,9 @@ def run_trace_smoke_training(
         minibatch_size=config.training.minibatch_size,
         generator=minibatch_generator,
     )
+    _record_stage(timing_observer, "ppo_optimization", stage_started)
+
+    stage_started = perf_counter()
     dual_report = dual_ascent.update(
         densities_veh_per_lane_km=prepared.all_densities,
         costs=prepared.all_training_costs,
@@ -391,7 +422,9 @@ def run_trace_smoke_training(
         dual_report=dual_report,
         dual_snapshot=dual_ascent.snapshot(),
     )
+    _record_stage(timing_observer, "metrics_and_dual", stage_started)
 
+    stage_started = perf_counter()
     metrics_path = destination / "metrics.jsonl"
     TrainingMetricsJSONL(metrics_path).append(metrics)
     counters = TrainingCounters(
@@ -441,6 +474,7 @@ def run_trace_smoke_training(
         json.dumps(report_payload, allow_nan=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    _record_stage(timing_observer, "artifact_publication", stage_started)
     return TraceSmokeTrainingResult(
         report_path=report_path,
         metrics_path=metrics_path,
@@ -448,6 +482,16 @@ def run_trace_smoke_training(
         metrics=metrics,
         report=MappingProxyType(report_payload),
     )
+
+
+def _record_stage(
+    observer: TraceTrainingTimingObserver | None,
+    name: str,
+    started: float,
+) -> None:
+    if observer is None:
+        return
+    observer.record_stage(name=name, elapsed_seconds=perf_counter() - started)
 
 
 def _validate_smoke_request(
@@ -787,7 +831,9 @@ def _report_payload(
 __all__ = [
     "TRACE_SMOKE_POLICY_NAME",
     "TRACE_SMOKE_REPORT_SCHEMA",
+    "TRACE_TRAINING_STAGE_NAMES",
     "TraceSmokeTrainingResult",
     "TraceTrainingError",
+    "TraceTrainingTimingObserver",
     "run_trace_smoke_training",
 ]

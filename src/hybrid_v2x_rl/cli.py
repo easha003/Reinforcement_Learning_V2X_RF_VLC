@@ -12,6 +12,7 @@ from rich.table import Table
 
 from hybrid_v2x_rl import __version__
 from hybrid_v2x_rl.agents.trace_training import run_trace_smoke_training
+from hybrid_v2x_rl.agents.training_profile import run_trace_training_profile
 from hybrid_v2x_rl.config import config_hash as hash_config
 from hybrid_v2x_rl.config import headline_config_layers, load_config
 from hybrid_v2x_rl.core.errors import HybridV2XError
@@ -374,6 +375,102 @@ def training_smoke(
         )
         console.print(f"report: {result.report_path}")
         console.print(f"checkpoint: {result.checkpoint.path}")
+
+
+@training_app.command("profile")
+def training_profile(
+    trace_id: Annotated[
+        str,
+        typer.Option("--trace-id", help="Configured training trace identifier."),
+    ] = "synthetic-d10-train-000",
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="New or empty artifact directory for the measured run.",
+            file_okay=False,
+        ),
+    ] = Path("artifacts/logs/phase8-profile-d10-seed1001"),
+    max_frames: Annotated[
+        int,
+        typer.Option(
+            "--max-frames",
+            min=3,
+            help="Consecutive frames in the representative measured iteration.",
+        ),
+    ] = 20,
+    policy_seed: Annotated[
+        int,
+        typer.Option("--policy-seed", min=0, help="Declared policy seed."),
+    ] = 1001,
+    environment_seed: Annotated[
+        int | None,
+        typer.Option(
+            "--environment-seed",
+            min=0,
+            help="Optional reset seed; defaults to training.root_seed.",
+        ),
+    ] = None,
+    config: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--config",
+            help="Layered YAML configuration path; repeat in merge order.",
+            exists=True,
+        ),
+    ] = None,
+    project_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--project-root",
+            help="Project root containing configs/ and artifacts/traces/.",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the complete machine-readable profile."),
+    ] = False,
+) -> None:
+    """Profile one real-trace PPO iteration on CPU."""
+
+    root = project_root if project_root is not None else Path.cwd()
+    layers = tuple(config) if config else headline_config_layers(root)
+    destination = output if output.is_absolute() else root / output
+    try:
+        resolved = load_config(layers, project_root=root)
+        result = run_trace_training_profile(
+            resolved,
+            trace_source(root, trace_id),
+            output_root=destination,
+            policy_seed=policy_seed,
+            environment_seed=environment_seed,
+            max_frames=max_frames,
+        )
+    except HybridV2XError as error:
+        console.print(f"[red]{type(error).__name__}: {error}[/red]")
+        raise typer.Exit(code=1) from error
+
+    if json_output:
+        typer.echo(json.dumps(dict(result.report), indent=2, sort_keys=True))
+    else:
+        measurement = cast(dict[str, object], result.report["measurement"])
+        throughput = cast(dict[str, object], result.report["throughput"])
+        estimates = cast(dict[str, object], result.report["wall_clock_estimates"])
+        memory = cast(dict[str, object], result.report["memory"])
+        environment_tps = cast(float, throughput["environment_transitions_per_second"])
+        hours_per_seed = cast(float, estimates["core_compute_hours_per_seed"])
+        peak_rss_mib = cast(float, memory["process_peak_rss_after_mib"])
+        console.print(
+            "[green]Phase 8 training profile passed[/green]: "
+            f"{environment_tps:.1f} env transitions/s, "
+            f"bottleneck={measurement['dominant_stage']}"
+        )
+        console.print(
+            f"estimated core compute: {hours_per_seed:.2f} h/seed, peak RSS={peak_rss_mib:.1f} MiB"
+        )
+        console.print(f"profile: {result.report_path}")
 
 
 if __name__ == "__main__":

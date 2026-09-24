@@ -623,7 +623,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
 
 1. [x] Overfit a tiny deterministic environment to confirm the full learning path.
 2. [x] Run short smoke training on one trace and one traffic density.
-3. [ ] Profile environment throughput, memory, and bottlenecks on the MacBook Pro M2.
+3. [x] Profile environment throughput, memory, and bottlenecks on the MacBook Pro M2.
 4. [ ] Train jointly across densities 10, 20, and 30 vehicles per lane-kilometer.
 5. [ ] Apply the reliability curriculum:
 
@@ -845,7 +845,10 @@ decision of `go`; the bounded history sample remains diagnostic. Phase 7 is
 complete: the independently tested actor, critics, estimators, PPO updater,
 dual ascent, metrics, and complete checkpoint state now pass an end-to-end
 tiny-CMDP test whose constrained and reward-only optima disagree. Phase 8 now
-has a reproducible one-iteration smoke run on the real density-10 training
-trace, including metrics and a complete checkpoint; it is explicitly not a
-convergence or feasibility result. Next, profile environment throughput,
-optimizer time, memory, and bottlenecks on the MacBook Pro M2.
+has a reproducible one-iteration smoke run and a three-repeat CPU performance
+profile on the real density-10 training trace. The M2 profile measures a median
+450.5 environment transitions/s and estimates 6.90 core-compute hours per
+10-million-transition seed; the environment, not PPO, is the bottleneck. Next,
+build the versioned joint-density trainer, first closing the declared
+internal-truncation bootstrap boundary, then train across densities 10, 20, and
+30.
