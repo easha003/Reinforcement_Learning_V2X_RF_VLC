@@ -47,7 +47,10 @@ generic probability-valued numerical boundary, while the training pipeline
 supplies only the configured conditional miss probability.  Invalid or unknown
 labels fail atomically.  Updates are projected onto each configured
 `[0, maximum]` interval, and immutable snapshots expose multiplier values plus
-per-density update counts for later checkpoint integration.
+per-density update counts for checkpoint integration.
+The training checkpoint now records that canonical snapshot together with the
+resolved density definitions.  Saving fails if density order, projection caps,
+or configuration identity has drifted.
 
 ## Verification
 

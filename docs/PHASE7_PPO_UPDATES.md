@@ -53,8 +53,11 @@ finiteness, and only then are the three optimizer steps applied. Returned
 metrics are pre-update scalars tagged with their actual minibatch row count.
 `agents.training_metrics` now row-weights them across update epochs and adds
 rollout-level explained variance plus per-density constraint/dual diagnostics.
-Checkpoint state, epoch/minibatch scheduling, and early stopping remain later
-tasks.
+All three model and Adam states are included by the immutable training artifact
+defined in `PHASE7_TRAINING_CHECKPOINTS.md`; tensor snapshots are detached and
+moved to CPU without altering the live updater.
+Checkpoint restoration, epoch/minibatch scheduling, and early stopping remain
+later tasks.
 
 ## Verification
 
