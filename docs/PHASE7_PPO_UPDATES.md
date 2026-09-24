@@ -26,8 +26,11 @@ L_clip  = mean(min(ratio * A_actor,
 loss_actor = -L_clip - entropy_coefficient * mean(entropy)
 ```
 
-`weight_cost` is an externally supplied, nonnegative, detached value for each
-row. `agents.dual_ascent.PerDensityDualAscent` now owns its exact
+`A_cost` is computed from the configured selected-action conditional miss
+probability; sampled binary misses are retained for final feasibility rather
+than substituted into the primary PPO estimator. `weight_cost` is an
+externally supplied, nonnegative, detached value for each row.
+`agents.dual_ascent.PerDensityDualAscent` owns its exact
 density-to-dual assignment and projected ascent update. Keeping that state
 outside this module separates the once-per-rollout constraint estimate from
 the epoch/minibatch PPO updates and keeps clipping behavior independently

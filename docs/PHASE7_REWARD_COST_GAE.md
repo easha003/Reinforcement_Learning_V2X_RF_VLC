@@ -5,8 +5,11 @@ Date: 2026-09-23
 ## Numerical contract
 
 The estimator computes independent generalized advantage estimates for the
-activation reward and the configured reliability-cost signal. For either
-scalar signal `x`, its temporal-difference residual and reverse recursion are
+activation reward and the configured reliability-cost signal. The primary
+learner fixes that cost signal to selected-action conditional miss probability;
+sampled binary misses remain evaluation outcomes rather than GAE inputs. For
+either scalar signal `x`, its temporal-difference residual and reverse
+recursion are
 
 ```text
 delta_t = x_t + gamma * bootstrap_t * V_next_t - V_t

@@ -494,6 +494,7 @@ checked across consecutive frames rather than only row by row.
 | RF/VLC airtime | `rf.timing.airtime_s`, `vlc.timing.airtime_s` |
 | Reliability budget | `service.miss_budget` |
 | Observation order/history/noise/latency | `observation` |
+| PPO reliability training signal | `training.cost_signal` |
 | Per-density dual learning rates and caps | `training.density_multipliers` |
 | Train/validation/test membership | `environment.splits` |
 

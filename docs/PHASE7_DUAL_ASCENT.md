@@ -18,8 +18,9 @@ lambda_rho   = clip(
 ```
 
 The estimate is the undiscounted arithmetic mean of the selected reliability
-training signal.  Cost GAE remains the signal used by the PPO surrogate and
-cost critic; it is not substituted for the density-level constraint estimate.
+training signal.  `PHASE7_COST_SIGNAL.md` fixes that signal to conditional miss
+probability for the primary learner.  Cost GAE uses the same conditional signal,
+but its discounted recursion is not substituted for this density-level mean.
 The active curriculum budget is supplied on each update, rather than being
 captured from the final service configuration.
 
@@ -41,10 +42,10 @@ only through the constrained PPO objective.
 ## Safety and state boundary
 
 Definitions, labels, costs, and budgets are validated before state mutation.
-Costs must be detached finite values in `[0, 1]`, which admits both sampled
-binary misses and conditional miss probabilities.  The following Phase 7 task
-will choose and document which of those signals the actor receives.  Invalid
-or unknown labels fail atomically.  Updates are projected onto each configured
+Costs must be detached finite values in `[0, 1]`.  The controller remains a
+generic probability-valued numerical boundary, while the training pipeline
+supplies only the configured conditional miss probability.  Invalid or unknown
+labels fail atomically.  Updates are projected onto each configured
 `[0, maximum]` interval, and immutable snapshots expose multiplier values plus
 per-density update counts for later checkpoint integration.
 

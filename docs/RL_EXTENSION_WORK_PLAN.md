@@ -584,7 +584,7 @@ Implement a shared categorical policy that minimizes activation cost while learn
 - [x] Distinguish true terminations from trace/time-limit truncations during bootstrapping.
 - [x] Implement PPO clipped actor and critic updates.
 - [x] Implement per-density dual ascent with nonnegative projection.
-- [ ] Decide and document whether the actor uses sampled binary costs, conditional risk, or a staged combination.
+- [x] Decide and document whether the actor uses sampled binary costs, conditional risk, or a staged combination.
 - [ ] Log policy loss, value losses, entropy, KL divergence, clip fraction, explained variance, constraint estimates, and dual variables.
 - [ ] Save model, optimizers, duals, normalization state, configuration, seed state, and training counters in checkpoints.
 - [ ] Restore a checkpoint and verify bitwise-identical deterministic actions where practical.
