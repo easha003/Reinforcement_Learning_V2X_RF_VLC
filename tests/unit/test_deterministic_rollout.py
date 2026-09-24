@@ -30,6 +30,7 @@ from hybrid_v2x_rl.mean_field.deterministic_rollout import (
     DeterministicRolloutError,
     canonical_policy_name,
     run_deterministic_rollout,
+    run_policy_rollout_with_state,
 )
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource
 from hybrid_v2x_rl.mobility.trace_io import MobilityTraceWriter, VehicleTraceRecord
@@ -167,6 +168,56 @@ def test_scripted_cycle_composes_shared_pool_and_cutoff(config, source) -> None:
     assert report.vlc_activations > 0
     assert report.max_population == 3
     assert report.max_pool_utilization >= 0.0
+
+
+def test_rollout_observer_receives_numeric_internal_truncation_final_row(
+    config,
+    source,
+) -> None:
+    class Policy:
+        name = "final-observation-probe"
+        requires_oracle_truth = False
+
+        def select_actions(self, decision, *, channel_truth):
+            assert channel_truth is None
+            return tuple(
+                PolicyAction.VLC if row.usable else None
+                for row in decision.actor_frame.rows
+            )
+
+    class Observer:
+        def __init__(self) -> None:
+            self.final = {}
+
+        def observe_frame(
+            self,
+            *,
+            decision,
+            actions,
+            outcomes,
+            boundary,
+            final_observation,
+        ):
+            del decision, actions, outcomes
+            assert tuple(final_observation) == boundary.bootstrap_pair_ids
+            self.final.update(final_observation)
+
+    observer = Observer()
+    result = run_policy_rollout_with_state(
+        config,
+        source,
+        policy=Policy(),
+        environment_seed=81,
+        policy_seed=92,
+        frame_observer=observer,
+    )
+
+    assert result.report.internal_truncations == 1
+    assert tuple(observer.final) == ("pair-c",)
+    final = observer.final["pair-c"]
+    assert final.pair_ids == ("pair-c",)
+    assert final.frame_index == 3
+    assert final.actor_observations.shape == (1, 37)
 
 
 def test_policy_names_accept_fixed_actions_and_reject_unknown_names() -> None:

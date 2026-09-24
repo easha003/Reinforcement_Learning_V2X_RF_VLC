@@ -138,8 +138,10 @@ crosses trace and episode boundaries.
 ## Current boundary and next task
 
 The 20-frame workload deliberately remains below the first internal
-`max_duration` truncation. The smoke/profile runner still refuses to approximate
-that bootstrap with reset state or zero. The next task is therefore to build the
-versioned joint-density trainer while first materializing the final physical
-observation required at internal truncation; only then should training proceed
-across densities 10, 20, and 30.
+`max_duration` truncation, so its published timing numbers are unchanged. The
+shared runner now crosses that boundary correctly: it materializes the old
+episode's next physical observation after feedback and before release, applies
+normalization without another statistics update, and evaluates both critics
+with the next population's centralized summary. The next task is to build the
+versioned joint-density trainer and rollout accumulator across densities 10,
+20, and 30.

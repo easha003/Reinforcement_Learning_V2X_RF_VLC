@@ -284,6 +284,39 @@ class DelayedCongestionFeedback:
             raise CongestionFeedbackError("actor observation schema is invalid")
         return schema.assemble(local_observation, self._visible)
 
+    def preview_next_frame(
+        self,
+        trace_id: str,
+        frame_index: int,
+    ) -> MeanFieldSignal:
+        """Return queued next-frame feedback without consuming it.
+
+        Internal time-limit truncations need a final physical observation after
+        current packet feedback has closed.  This read-only view gives that
+        observation the same delayed signal the ordinary next population will
+        receive, while leaving :meth:`begin_frame` as the sole consumer.
+        """
+
+        if self._trace_id is None or self._expected_frame_index is None:
+            raise CongestionFeedbackError("mean-field feedback must be reset first")
+        if self._open_frame_index is not None:
+            raise CongestionFeedbackError(
+                "next-frame feedback is available only after the frame closes"
+            )
+        if trace_id != self._trace_id:
+            raise CongestionFeedbackError(
+                "preview trace does not match the active mean-field episode",
+                context={"actual": trace_id, "expected": self._trace_id},
+            )
+        if frame_index != self._expected_frame_index:
+            raise CongestionFeedbackError(
+                "next-frame feedback preview must use the expected frame index",
+                context={"actual": frame_index, "expected": self._expected_frame_index},
+            )
+        if self._pending is None:
+            raise CongestionFeedbackError("no next-frame feedback is queued")
+        return self._pending
+
     def close_frame(self, response: RFPoolResponse) -> None:
         """Queue current audited demand for the next decision frame."""
 

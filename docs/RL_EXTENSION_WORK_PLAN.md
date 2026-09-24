@@ -624,6 +624,8 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
 1. [x] Overfit a tiny deterministic environment to confirm the full learning path.
 2. [x] Run short smoke training on one trace and one traffic density.
 3. [x] Profile environment throughput, memory, and bottlenecks on the MacBook Pro M2.
+   - [x] Materialize and train through bootstrap-valid internal truncations using
+     the old episode ID's next physical observation.
 4. [ ] Train jointly across densities 10, 20, and 30 vehicles per lane-kilometer.
 5. [ ] Apply the reliability curriculum:
 
@@ -848,7 +850,11 @@ tiny-CMDP test whose constrained and reward-only optima disagree. Phase 8 now
 has a reproducible one-iteration smoke run and a three-repeat CPU performance
 profile on the real density-10 training trace. The M2 profile measures a median
 450.5 environment transitions/s and estimates 6.90 core-compute hours per
-10-million-transition seed; the environment, not PPO, is the bottleneck. Next,
-build the versioned joint-density trainer, first closing the declared
-internal-truncation bootstrap boundary, then train across densities 10, 20, and
-30.
+10-million-transition seed; the environment, not PPO, is the bottleneck. The
+internal-truncation prerequisite is now closed: current feedback is applied
+before the old episode's next physical observation is materialized, the old
+history is released only afterward, normalization is read-only for that extra
+row, and reward/cost critics evaluate it with the ordinary next population's
+centralized summary. Recursive GAE still stops at the reset. Next, build the
+versioned joint-density trainer and its rollout accumulation across densities
+10, 20, and 30.

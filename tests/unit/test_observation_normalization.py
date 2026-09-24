@@ -247,6 +247,44 @@ def test_every_row_in_a_frame_uses_the_same_historical_snapshot(config) -> None:
     )
 
 
+def test_final_observation_transform_is_read_only_and_keeps_old_pair_id(config) -> None:
+    normalizer = ObservationNormalizer.from_config(config)
+    current = _population_frame(index=3)
+    normalized = normalizer.begin_frame(
+        current,
+        _actor_frame(
+            config,
+            current,
+            (_row_values(config, 0.0), _row_values(config, 2.0)),
+        ),
+    )
+    normalizer.complete_frame(normalized, _actions(0, 0))
+    before = normalizer.snapshot()
+    next_frame = _population_frame(pair_ids=("pair-b",), index=4)
+    signal = MeanFieldSignal(
+        mean_rf_attempt_fraction=0.25,
+        valid=True,
+        source_trace_id=next_frame.trace_id,
+        source_frame_index=3,
+    )
+    final_actor = CausalActorFrame(
+        trace_id=next_frame.trace_id,
+        frame_index=next_frame.index,
+        time_s=next_frame.time_s,
+        schema=_schema(config),
+        signal=signal,
+        rows=(CausalActorRow(pair_id="pair-a", values=_row_values(config, 4.0)),),
+    )
+
+    final = normalizer.transform_final_observations(next_frame, final_actor)
+
+    assert final.observation.pair_ids == ("pair-a",)
+    assert final.observation.frame_index == next_frame.index
+    assert final.statistics_count_before == before.count
+    assert normalizer.snapshot() == before
+    assert normalizer.training_rows == 2
+
+
 def test_missing_sentinels_and_history_padding_are_training_samples(config) -> None:
     normalizer = ObservationNormalizer.from_config(config)
     frame = _population_frame()

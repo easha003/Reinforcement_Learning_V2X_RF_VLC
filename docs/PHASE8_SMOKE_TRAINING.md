@@ -96,15 +96,17 @@ restore the resulting checkpoint, verify exact named generator coverage,
 repeat the run to compare metrics and environment fingerprints, and reject
 reuse of a nonempty evidence directory.
 
-The smoke runner currently rejects a rollout containing an internal
-`max_duration` truncation. Such a row needs a separately materialized final
-physical observation for value inference; using the reset population or zero
-would violate the established lifecycle contract. The five-frame canonical
-run contains no such boundary. Full-length training must implement that final
-observation path before it is allowed to cross an internal truncation.
+The shared rollout now supports internal `max_duration` truncations without
+using reset state or a zero approximation. After current feedback closes, it
+materializes the ending episode's observation at the next physical trace
+instant under the old stable ID, normalizes that critic-only row without
+updating statistics, and releases old pair history afterward. The reward and
+cost critics combine that row with the ordinary next population's centralized
+summary. One-step value bootstrap remains enabled while recursive GAE stops at
+the episode reset. A compact end-to-end training test exercises this path and
+restores its published checkpoint.
 
 ## Next task
 
-Profile environment throughput, optimizer time, memory, and dominant
-bottlenecks on the MacBook Pro M2 before choosing full-run rollout sizes or
-external compute.
+Build the versioned joint-density trainer and accumulate complete rollout
+batches across densities 10, 20, and 30 before starting long training runs.

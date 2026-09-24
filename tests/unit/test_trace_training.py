@@ -85,6 +85,60 @@ def source(tmp_path: Path, config) -> FrameTraceSource:
     return FrameTraceSource.discover(artifact.path, expected_split="train")
 
 
+@pytest.fixture()
+def truncation_source(tmp_path: Path, config) -> FrameTraceSource:
+    times = tuple(0.05 * index for index in range(11))
+    vehicles = [
+        _vehicle(time_s, vehicle_index)
+        for time_s in times
+        for vehicle_index in range(1, 3)
+    ]
+    pairs = (
+        {
+            "trace_id": TRACE_ID,
+            "pair_id": "pair-old",
+            "tx_id": "veh-1",
+            "rx_id": "veh-2",
+            "start_s": 0.0,
+            "end_s": 0.2,
+            "duration_s": 0.2,
+            "initial_distance_m": 9.0,
+            "route_id": "route-0",
+            "eligibility_reason": "max_duration",
+            "has_intervening_vehicle": False,
+        },
+        {
+            "trace_id": TRACE_ID,
+            "pair_id": "pair-new",
+            "tx_id": "veh-1",
+            "rx_id": "veh-2",
+            "start_s": 0.3,
+            "end_s": 0.4,
+            "duration_s": 0.1,
+            "initial_distance_m": 9.0,
+            "route_id": "route-0",
+            "eligibility_reason": "route_diverged",
+            "has_intervening_vehicle": False,
+        },
+    )
+    artifact = MobilityTraceWriter(
+        ArtifactStore(tmp_path / "artifacts"),
+        rows_per_part=8,
+    ).write(
+        trace_id=TRACE_ID,
+        vehicles=vehicles,
+        signals=(),
+        pairs=pairs,
+        network_definition="{}",
+        route_definition="{}",
+        resolved_config_yaml="test: trace-internal-truncation-training\n",
+        config_hash=config_hash(config),
+        code_version="test",
+        random_seeds={"mobility": 31},
+    )
+    return FrameTraceSource.discover(artifact.path, expected_split="train")
+
+
 def test_trace_smoke_run_publishes_metrics_and_complete_checkpoint(
     config,
     source: FrameTraceSource,
@@ -166,3 +220,30 @@ def test_trace_smoke_run_is_reproducible_and_output_is_immutable(
             environment_seed=71,
             max_frames=3,
         )
+
+
+def test_trace_training_bootstraps_internal_truncation_from_old_id_final_row(
+    config,
+    truncation_source: FrameTraceSource,
+    tmp_path: Path,
+) -> None:
+    result = run_trace_smoke_training(
+        config,
+        truncation_source,
+        output_root=tmp_path / "internal-truncation",
+        policy_seed=1001,
+        environment_seed=71,
+        max_frames=4,
+    )
+
+    environment = result.report["environment_report"]
+    assert environment["internal_truncations"] == 1
+    assert result.metrics.rollout_transitions == 3
+    assert result.metrics.learning_rows >= 1
+    restored = restore_training_checkpoint(
+        result.checkpoint.path,
+        config=config,
+        expected_sha256=result.checkpoint.sha256,
+        restore_global_rng=False,
+    )
+    assert restored.counters.episodes_completed >= 1

@@ -39,6 +39,7 @@ from hybrid_v2x_rl.env.assembly import build_rollout
 from hybrid_v2x_rl.env.episodes import VehiclePose
 from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
+from hybrid_v2x_rl.mean_field.environment_api import FrameObservation
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, PopulationFrameReader
 from hybrid_v2x_rl.mean_field.normalization import (
     ObservationNormalizationState,
@@ -82,21 +83,8 @@ class PopulationRolloutObserver(Protocol):
         actions: tuple[PolicyAction, ...],
         outcomes: FramePacketOutcomes,
         boundary: FrameReturnBoundary,
+        final_observation: Mapping[str, FrameObservation],
     ) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class BootstrapObservationReference:
-    """Identity of a required internal-truncation bootstrap observation.
-
-    The Phase 5 harness validates exact coverage without inventing a numeric
-    actor tensor.  A future trainable environment must replace this reference
-    with the separately materialized final observation before value inference.
-    """
-
-    trace_id: str
-    pair_id: str
-    next_frame_index: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -584,7 +572,16 @@ def run_policy_rollout_with_state(
     cluster_actions: dict[str, list[int]] = {}
     max_pool_utilization = 0.0
 
-    for frame in reader.iter_frames(max_frames=max_frames):
+    frame_iterator = iter(reader.iter_frames())
+    try:
+        frame = next(frame_iterator)
+    except StopIteration:
+        frame = None
+    while frame is not None and (max_frames is None or frames < max_frames):
+        try:
+            next_frame = next(frame_iterator)
+        except StopIteration:
+            next_frame = None
         actor_frame = actor_assembler.begin_frame(frame)
         normalized_frame = normalizer.begin_frame(frame, actor_frame)
         observation = normalized_frame.observation
@@ -679,22 +676,6 @@ def run_policy_rollout_with_state(
             vlc_results_by_pair=vlc_results,
         )
         boundary = FrameReturnBoundary.from_frame(ledger, actor_frame)
-        final_references = {
-            pair_id: BootstrapObservationReference(
-                trace_id=frame.trace_id,
-                pair_id=pair_id,
-                next_frame_index=frame.index + 1,
-            )
-            for pair_id in boundary.bootstrap_pair_ids
-        }
-        boundary.as_step_info(final_observation=final_references)
-        if frame_observer is not None:
-            frame_observer.observe_frame(
-                decision=decision,
-                actions=tuple(proposals),
-                outcomes=outcomes,
-                boundary=boundary,
-            )
 
         for outcome in outcomes.pair_outcomes:
             spec = action_resources(outcome.action)
@@ -736,7 +717,53 @@ def run_policy_rollout_with_state(
             )
             per_action[int(outcome.action)] += 1
             action_counts[int(outcome.action)] += 1
-        actor_assembler.close_frame(pool_response)
+        final_actor_frame = actor_assembler.close_frame(
+            pool_response,
+            next_frame=next_frame,
+        )
+        final_observation: dict[str, FrameObservation] = {}
+        if final_actor_frame is not None:
+            if next_frame is None:  # pragma: no cover - assembler rejects this first.
+                raise DeterministicRolloutError(
+                    "final actor observations require a next physical frame"
+                )
+            if final_actor_frame.pair_ids != boundary.bootstrap_pair_ids:
+                raise DeterministicRolloutError(
+                    "final actor observations do not cover bootstrap pairs exactly",
+                    context={
+                        "actual": final_actor_frame.pair_ids,
+                        "expected": boundary.bootstrap_pair_ids,
+                    },
+                )
+            if not all(final_actor_frame.usable_mask):
+                raise DeterministicRolloutError(
+                    "a bootstrap-valid final observation must be causally usable",
+                    context={"pair_ids": final_actor_frame.unusable_pair_ids},
+                )
+            normalized_final = normalizer.transform_final_observations(
+                next_frame,
+                final_actor_frame,
+            )
+            final_batch = normalized_final.observation
+            for row, pair_id in enumerate(final_batch.pair_ids):
+                final_observation[pair_id] = FrameObservation(
+                    trace_id=final_batch.trace_id,
+                    frame_index=final_batch.frame_index,
+                    time_s=final_batch.time_s,
+                    pair_ids=(pair_id,),
+                    actor_observations=final_batch.actor_observations[row : row + 1],
+                    action_masks=final_batch.action_masks[row : row + 1],
+                )
+        boundary.as_step_info(final_observation=final_observation)
+        frozen_final_observation = MappingProxyType(final_observation)
+        if frame_observer is not None:
+            frame_observer.observe_frame(
+                decision=decision,
+                actions=tuple(proposals),
+                outcomes=outcomes,
+                boundary=boundary,
+                final_observation=frozen_final_observation,
+            )
         for pair_id in boundary.final_pair_ids:
             physical.release(pair_id)
 
@@ -791,9 +818,14 @@ def run_policy_rollout_with_state(
                     "bootstrap_valid": boundary.bootstrap_valid.tolist(),
                     "learn_mask": boundary.learn_mask.tolist(),
                     "end_reasons": boundary.end_reasons,
+                    "final_observation": {
+                        pair_id: value.actor_observations[0].tolist()
+                        for pair_id, value in final_observation.items()
+                    },
                 },
             },
         )
+        frame = next_frame
 
     if freeze_normalization_at_end and not normalizer.frozen:
         final_normalization_state = normalizer.freeze()
@@ -913,7 +945,6 @@ __all__ = [
     "POLICY_CYCLE",
     "POLICY_NAMES",
     "POLICY_RANDOM",
-    "BootstrapObservationReference",
     "DeterministicRolloutError",
     "DeterministicRolloutReport",
     "EpisodeClusterTally",

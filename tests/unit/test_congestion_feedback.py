@@ -124,6 +124,35 @@ def test_current_demand_becomes_visible_exactly_one_frame_later() -> None:
     assert next_actor[-2:] == pytest.approx((0.5, 1.0))
 
 
+def test_closed_frame_signal_can_be_previewed_without_consuming_it() -> None:
+    feedback = _feedback()
+    feedback.reset(TRACE_ID)
+    feedback.begin_frame(TRACE_ID, 0)
+    feedback.close_frame(_response(0, (4, 0)))
+
+    preview = feedback.preview_next_frame(TRACE_ID, 1)
+    repeated = feedback.preview_next_frame(TRACE_ID, 1)
+
+    assert repeated is preview
+    assert preview.vector == pytest.approx((0.5, 1.0))
+    assert feedback.begin_frame(TRACE_ID, 1) is preview
+
+
+def test_next_frame_preview_requires_closed_exact_identity_and_queued_state() -> None:
+    feedback = _feedback()
+    feedback.reset(TRACE_ID)
+    with pytest.raises(CongestionFeedbackError, match="no next-frame feedback"):
+        feedback.preview_next_frame(TRACE_ID, 0)
+    feedback.begin_frame(TRACE_ID, 0)
+    with pytest.raises(CongestionFeedbackError, match="only after the frame closes"):
+        feedback.preview_next_frame(TRACE_ID, 1)
+    feedback.close_frame(_response(0, (1,)))
+    with pytest.raises(CongestionFeedbackError, match="preview trace"):
+        feedback.preview_next_frame(OTHER_TRACE_ID, 1)
+    with pytest.raises(CongestionFeedbackError, match="expected frame index"):
+        feedback.preview_next_frame(TRACE_ID, 2)
+
+
 def test_same_frame_cbr_and_collision_never_enter_the_delayed_suffix() -> None:
     feedback = _feedback()
     schema = _actor_schema()

@@ -530,6 +530,100 @@ def test_final_pair_history_is_released_only_after_its_feedback_is_processed() -
     assert "pair-a" not in perception.initialized
 
 
+def test_internal_truncation_materializes_next_physical_row_before_release() -> None:
+    assembler, perception = _assembler()
+    assembler.reset(TRACE_ID, start_frame_index=1)
+    final = _frame(
+        1,
+        ("pair-a",),
+        episode_steps={"pair-a": 1},
+        lifecycles={
+            "pair-a": PairLifecycle(
+                born=False,
+                truncated=True,
+                bootstrap_valid=True,
+                end_reason="max_duration",
+            )
+        },
+    )
+    next_frame = _frame(
+        2,
+        ("pair-b",),
+        born_pair_ids=frozenset({"pair-b"}),
+        episode_steps={"pair-b": 0},
+        extra_vehicle_ids=("veh-1", "veh-2"),
+    )
+    assembler.begin_frame(final)
+    assembler.record_feedback(
+        "pair-a",
+        action=PolicyAction.RF_4,
+        at_s=final.time_s + 0.001,
+        delivered=False,
+        measurements={Link.RF: 0.4},
+    )
+
+    final_actor = assembler.close_frame(
+        _response(final, (4,)),
+        next_frame=next_frame,
+    )
+
+    assert final_actor is not None
+    assert final_actor.pair_ids == ("pair-a",)
+    assert final_actor.frame_index == 2
+    assert final_actor.time_s == pytest.approx(next_frame.time_s)
+    values = final_actor.rows[0].values
+    assert values is not None
+    assert values[final_actor.schema.columns.index("previous_action")] == float(
+        PolicyAction.RF_4
+    )
+    assert values[final_actor.schema.columns.index("last_delivery_outcome")] == 0.0
+    assert values[-2:] == (1.0, 1.0)
+    assert perception.instants[-1].pair_id == "pair-a"
+    assert perception.instants[-1].index == 2
+    assert perception.instants[-1].final
+    assert perception.released == ["pair-a"]
+
+    ordinary_next = assembler.begin_frame(next_frame)
+    assert ordinary_next.signal is final_actor.signal
+    assert ordinary_next.pair_ids == ("pair-b",)
+
+
+def test_internal_truncation_requires_next_frame_endpoints() -> None:
+    assembler, _ = _assembler()
+    assembler.reset(TRACE_ID, start_frame_index=1)
+    final = _frame(
+        1,
+        ("pair-a",),
+        episode_steps={"pair-a": 1},
+        lifecycles={
+            "pair-a": PairLifecycle(
+                born=False,
+                truncated=True,
+                bootstrap_valid=True,
+                end_reason="max_duration",
+            )
+        },
+    )
+    assembler.begin_frame(final)
+    assembler.record_feedback(
+        "pair-a",
+        action=PolicyAction.VLC,
+        at_s=final.time_s + 0.001,
+        delivered=True,
+    )
+
+    with pytest.raises(CausalObservationError, match="endpoints are absent"):
+        assembler.close_frame(
+            _response(final, (0,)),
+            next_frame=_frame(
+                2,
+                ("pair-b",),
+                born_pair_ids=frozenset({"pair-b"}),
+                episode_steps={"pair-b": 0},
+            ),
+        )
+
+
 def test_finalized_pair_cannot_remain_active_on_the_next_frame() -> None:
     assembler, perception = _assembler()
     assembler.reset(TRACE_ID, start_frame_index=1)
@@ -553,7 +647,14 @@ def test_finalized_pair_cannot_remain_active_on_the_next_frame() -> None:
         at_s=final.time_s + 0.001,
         delivered=True,
     )
-    assembler.close_frame(_response(final, (0,)))
+    assembler.close_frame(
+        _response(final, (0,)),
+        next_frame=_frame(
+            2,
+            (),
+            extra_vehicle_ids=("veh-1", "veh-2"),
+        ),
+    )
 
     illegal = _frame(
         2,
@@ -562,7 +663,7 @@ def test_finalized_pair_cannot_remain_active_on_the_next_frame() -> None:
     )
     with pytest.raises(CausalObservationError, match="finalized pair"):
         assembler.begin_frame(illegal)
-    assert perception.instants[-1].index == 1
+    assert perception.instants[-1].index == 2
 
 
 def test_real_perception_records_the_exact_nine_action_index() -> None:

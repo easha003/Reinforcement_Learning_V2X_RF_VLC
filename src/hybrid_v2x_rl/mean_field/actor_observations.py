@@ -429,8 +429,20 @@ class CausalActorObservationAssembler:
         )
         self._recorded_pair_ids.add(pair_id)
 
-    def close_frame(self, response: RFPoolResponse) -> None:
-        """Close current action feedback and queue its load for the next frame."""
+    def close_frame(
+        self,
+        response: RFPoolResponse,
+        *,
+        next_frame: PopulationFrame | None = None,
+    ) -> CausalActorFrame | None:
+        """Close feedback and optionally materialize time-limit final rows.
+
+        A bootstrap-valid truncation owns one extra observation at the next
+        physical trace instant.  It is observed with the ending pair's link
+        history after current feedback, but before that history is released.
+        The returned frame contains only those ending pair IDs and does not
+        advance or consume the ordinary next population frame.
+        """
 
         frame = self._open_frame
         if frame is None:
@@ -456,6 +468,106 @@ class CausalActorObservationAssembler:
                 context={"actual": response_ids, "expected": frame.active_pair_ids},
             )
         self.congestion.close_frame(response)
+        bootstrap_pairs = tuple(
+            pair for pair in frame.pairs if pair.lifecycle.bootstrap_valid
+        )
+        final_actor_frame: CausalActorFrame | None = None
+        if bootstrap_pairs:
+            if not isinstance(next_frame, PopulationFrame):
+                raise CausalObservationError(
+                    "bootstrap-valid truncations require the next physical frame",
+                    context={"pair_ids": tuple(pair.pair_id for pair in bootstrap_pairs)},
+                )
+            identity_mismatches: dict[str, object] = {}
+            if next_frame.trace_id != frame.trace_id:
+                identity_mismatches["trace_id"] = (
+                    next_frame.trace_id,
+                    frame.trace_id,
+                )
+            if next_frame.index != frame.index + 1:
+                identity_mismatches["frame_index"] = (
+                    next_frame.index,
+                    frame.index + 1,
+                )
+            if next_frame.time_s <= frame.time_s:
+                identity_mismatches["time_s"] = (
+                    next_frame.time_s,
+                    frame.time_s,
+                )
+            if identity_mismatches:
+                raise CausalObservationError(
+                    "final observations require the immediate next physical frame",
+                    context=identity_mismatches,
+                )
+
+            vehicles_by_id = {
+                vehicle.vehicle_id: vehicle for vehicle in next_frame.vehicles
+            }
+            signal = self.congestion.preview_next_frame(
+                next_frame.trace_id,
+                next_frame.index,
+            )
+            final_rows: list[CausalActorRow] = []
+            for pair in bootstrap_pairs:
+                missing_endpoints = tuple(
+                    endpoint
+                    for endpoint in pair.endpoint_ids
+                    if endpoint not in vehicles_by_id
+                )
+                if missing_endpoints:
+                    raise CausalObservationError(
+                        "bootstrap-valid pair endpoints are absent from the next physical frame",
+                        context={
+                            "pair_id": pair.pair_id,
+                            "missing_endpoint_ids": missing_endpoints,
+                        },
+                    )
+                local = self.perception.observe(
+                    PairInstant(
+                        trace_id=next_frame.trace_id,
+                        pair_id=pair.pair_id,
+                        index=pair.episode_step + 1,
+                        time_s=next_frame.time_s,
+                        transmitter=cast(
+                            VehiclePose,
+                            vehicles_by_id[pair.transmitter.vehicle_id],
+                        ),
+                        receiver=cast(
+                            VehiclePose,
+                            vehicles_by_id[pair.receiver.vehicle_id],
+                        ),
+                        neighbours=cast(tuple[VehiclePose, ...], next_frame.vehicles),
+                        index_of_frame=next_frame.spatial_index,
+                        final=True,
+                    )
+                )
+                if local is not None and len(local) != self.schema.local.width:
+                    raise CausalObservationError(
+                        "perception produced a final local row with the wrong width",
+                        context={
+                            "pair_id": pair.pair_id,
+                            "actual": len(local),
+                            "expected": self.schema.local.width,
+                        },
+                    )
+                final_rows.append(
+                    CausalActorRow(
+                        pair_id=pair.pair_id,
+                        values=(
+                            None
+                            if local is None
+                            else self.schema.assemble(local, signal)
+                        ),
+                    )
+                )
+            final_actor_frame = CausalActorFrame(
+                trace_id=next_frame.trace_id,
+                frame_index=next_frame.index,
+                time_s=next_frame.time_s,
+                schema=self.schema,
+                signal=signal,
+                rows=tuple(final_rows),
+            )
         finalized_pair_ids = tuple(
             pair.pair_id for pair in frame.pairs if pair.lifecycle.final
         )
@@ -465,6 +577,7 @@ class CausalActorObservationAssembler:
         self._expected_frame_index = frame.index + 1
         self._open_frame = None
         self._recorded_pair_ids.clear()
+        return final_actor_frame
 
 
 __all__ = [

@@ -566,6 +566,90 @@ class ObservationNormalizer:
         )
         return normalized
 
+    def transform_final_observations(
+        self,
+        next_frame: PopulationFrame,
+        actor_frame: CausalActorFrame,
+    ) -> NormalizedActorFrame:
+        """Normalize internal-truncation rows without updating state.
+
+        These rows are critic-only observations at the next physical instant;
+        they are not actions and therefore must neither open a normalization
+        frame nor become additional training-statistics samples.
+        """
+
+        if self._pending is not None:
+            raise ObservationNormalizationError(
+                "final observations require the acted normalization frame to be complete"
+            )
+        if not isinstance(next_frame, PopulationFrame):
+            raise ObservationNormalizationError(
+                "final-observation normalization requires a PopulationFrame"
+            )
+        if not isinstance(actor_frame, CausalActorFrame):
+            raise ObservationNormalizationError(
+                "final-observation normalization requires a CausalActorFrame"
+            )
+        mismatches: dict[str, object] = {}
+        if next_frame.trace_id != actor_frame.trace_id:
+            mismatches["trace_id"] = (next_frame.trace_id, actor_frame.trace_id)
+        if next_frame.index != actor_frame.frame_index:
+            mismatches["frame_index"] = (next_frame.index, actor_frame.frame_index)
+        if not math.isclose(
+            next_frame.time_s,
+            actor_frame.time_s,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            mismatches["time_s"] = (next_frame.time_s, actor_frame.time_s)
+        if actor_frame.schema.columns != self.columns:
+            mismatches["columns"] = (actor_frame.schema.columns, self.columns)
+        if mismatches:
+            raise ObservationNormalizationError(
+                "final actor rows do not belong to the next physical frame",
+                context=mismatches,
+            )
+        if not self._frozen and next_frame.source.split != "train":
+            raise ObservationNormalizationError(
+                "validation/test normalization requires frozen training state",
+                context={
+                    "split": next_frame.source.split,
+                    "trace_id": next_frame.trace_id,
+                },
+            )
+
+        usable = np.asarray(actor_frame.usable_mask, dtype=np.bool_)
+        raw_valid = np.asarray(
+            [row.values for row in actor_frame.rows if row.values is not None],
+            dtype=np.float64,
+        )
+        if raw_valid.size == 0:
+            raw_valid = np.empty((0, len(self.columns)), dtype=np.float64)
+        if raw_valid.shape != (int(np.count_nonzero(usable)), len(self.columns)):
+            raise ObservationNormalizationError(
+                "raw final rows do not match the causal usable mask"
+            )
+        actor_values = np.zeros(
+            (len(actor_frame.rows), len(self.columns)),
+            dtype=np.float32,
+        )
+        actor_values[usable] = self._transform_valid_rows(raw_valid)
+        mask_row = np.asarray(self.action_space.mask.values, dtype=np.bool_)
+        observation = FrameObservation(
+            trace_id=actor_frame.trace_id,
+            frame_index=actor_frame.frame_index,
+            time_s=actor_frame.time_s,
+            pair_ids=actor_frame.pair_ids,
+            actor_observations=actor_values,
+            action_masks=np.tile(mask_row, (len(actor_frame.rows), 1)),
+        )
+        return NormalizedActorFrame(
+            split=next_frame.source.split,
+            observation=observation,
+            usable_mask=usable,
+            statistics_count_before=tuple(int(value) for value in self._count),
+        )
+
     def _batch_update(self, raw_rows: Float64Array) -> None:
         if raw_rows.shape[0] == 0:
             return

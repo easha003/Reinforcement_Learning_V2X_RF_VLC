@@ -4,8 +4,9 @@ The smoke boundary is intentionally smaller than the future full trainer.  It
 collects several consecutive frames from one declared training trace, reserves
 the final collected frame as the value-bootstrap source, performs one complete
 primal-dual PPO iteration, and publishes metrics plus a complete checkpoint.
-Internal time-limit truncations are rejected until the environment can
-materialize their separate final physical observations for critic inference.
+Internal time-limit truncations use separately materialized next-physical
+observations for one-step critic bootstrapping without continuing GAE across
+the episode reset.
 """
 
 from __future__ import annotations
@@ -156,6 +157,7 @@ class _ObservedFrameSample:
     policy: _PolicyFrameSample
     outcomes: FramePacketOutcomes
     boundary: FrameReturnBoundary
+    final_observation: Mapping[str, FrameObservation]
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +288,7 @@ class _TracePPOCollector(PopulationRolloutObserver):
         actions: tuple[PolicyAction, ...],
         outcomes: FramePacketOutcomes,
         boundary: FrameReturnBoundary,
+        final_observation: Mapping[str, FrameObservation],
     ) -> None:
         frame_index = decision.frame.index
         try:
@@ -303,11 +306,33 @@ class _TracePPOCollector(PopulationRolloutObserver):
             or boundary.pair_ids != sample.observation.pair_ids
         ):
             raise TraceTrainingError("completed rollout rows do not align with policy rows")
+        expected_final_ids = boundary.bootstrap_pair_ids
+        if tuple(final_observation) != expected_final_ids:
+            raise TraceTrainingError(
+                "completed final observations do not cover bootstrap pairs exactly",
+                context={
+                    "actual": tuple(final_observation),
+                    "expected": expected_final_ids,
+                },
+            )
+        for pair_id, observation in final_observation.items():
+            if (
+                not isinstance(observation, FrameObservation)
+                or observation.pair_ids != (pair_id,)
+                or observation.trace_id != sample.observation.trace_id
+                or observation.frame_index != sample.observation.frame_index + 1
+                or observation.time_s <= sample.observation.time_s
+            ):
+                raise TraceTrainingError(
+                    "a final observation must be one old-ID row at the next physical instant",
+                    context={"pair_id": pair_id},
+                )
         self._frames.append(
             _ObservedFrameSample(
                 policy=sample,
                 outcomes=outcomes,
                 boundary=boundary,
+                final_observation=MappingProxyType(dict(final_observation)),
             )
         )
 
@@ -387,6 +412,7 @@ def run_trace_smoke_training(
     prepared = _prepare_rollout(
         frames=frames,
         config=config,
+        updater=updater,
         dual_ascent=dual_ascent,
         density_veh_per_lane_km=source.density,
     )
@@ -544,10 +570,76 @@ def _prepare_output_root(path: str | Path) -> Path:
     return destination
 
 
+def _final_observation_values(
+    *,
+    current: _ObservedFrameSample,
+    following: _ObservedFrameSample,
+    updater: PPOUpdater,
+) -> PairedCriticValues | None:
+    """Evaluate old-ID final rows with the next population's global context."""
+
+    pair_ids = current.boundary.bootstrap_pair_ids
+    if not pair_ids:
+        if current.final_observation:
+            raise TraceTrainingError(
+                "a frame without bootstrap-valid truncations has final observations"
+            )
+        return None
+    if tuple(current.final_observation) != pair_ids:
+        raise TraceTrainingError(
+            "final observations do not use canonical bootstrap-pair order"
+        )
+    next_observation = following.policy.observation
+    if following.policy.critic_observations.shape[0] == 0:
+        raise TraceTrainingError(
+            "internal truncation bootstrapping requires a non-empty next population"
+        )
+
+    final_rows: list[torch.Tensor] = []
+    for pair_id in pair_ids:
+        observation = current.final_observation[pair_id]
+        if (
+            observation.trace_id != next_observation.trace_id
+            or observation.frame_index != next_observation.frame_index
+            or not math.isclose(
+                observation.time_s,
+                next_observation.time_s,
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+            or observation.pair_ids != (pair_id,)
+        ):
+            raise TraceTrainingError(
+                "final and ordinary next observations do not share one physical frame",
+                context={"pair_id": pair_id},
+            )
+        final_rows.append(
+            torch.tensor(observation.actor_observations[0], dtype=torch.float32)
+        )
+
+    actor = torch.stack(final_rows)
+    actor_width = actor.shape[1]
+    critic_width = following.policy.critic_observations.shape[1]
+    if critic_width <= actor_width:
+        raise TraceTrainingError(
+            "next critic observations are missing their population-global suffix"
+        )
+    global_suffix = following.policy.critic_observations[0, actor_width:]
+    final_critic = torch.cat(
+        (actor, global_suffix.unsqueeze(0).expand(len(pair_ids), -1)),
+        dim=1,
+    )
+    with torch.no_grad():
+        reward = updater.reward_critic(final_critic).detach()
+        cost = updater.cost_critic(final_critic).detach()
+    return PairedCriticValues(pair_ids=pair_ids, reward=reward, cost=cost)
+
+
 def _prepare_rollout(
     *,
     frames: tuple[_ObservedFrameSample, ...],
     config: ProjectConfig,
+    updater: PPOUpdater,
     dual_ascent: PerDensityDualAscent,
     density_veh_per_lane_km: float,
 ) -> _PreparedRollout:
@@ -563,15 +655,11 @@ def _prepare_rollout(
     order = 0
 
     for current, following in zip(optimized, frames[1:], strict=True):
-        if current.boundary.bootstrap_pair_ids:
-            raise TraceTrainingError(
-                "trace smoke training cannot approximate internal-truncation bootstraps",
-                context={
-                    "frame_index": current.policy.observation.frame_index,
-                    "pair_ids": current.boundary.bootstrap_pair_ids,
-                },
+        boundary_info = dict(
+            current.boundary.as_step_info(
+                final_observation=current.final_observation,
             )
-        boundary_info = dict(current.boundary.as_step_info(final_observation={}))
+        )
         outcome_info = dict(current.outcomes.as_step_info())
         step = FrameStepOutput(
             next_observation=following.policy.observation,
@@ -582,6 +670,11 @@ def _prepare_rollout(
             bootstrap_valid=current.boundary.bootstrap_valid,
             learn_mask=current.boundary.learn_mask,
             info={**outcome_info, **boundary_info},
+        )
+        final_values = _final_observation_values(
+            current=current,
+            following=following,
+            updater=updater,
         )
         lifecycle = assemble_lifecycle_bootstrap(
             step_output=step,
@@ -595,6 +688,7 @@ def _prepare_rollout(
                 reward=following.policy.reward_values,
                 cost=following.policy.cost_values,
             ),
+            final_observation_values=final_values,
         )
         costs = reliability_costs_from_config(
             sampled_miss_costs=torch.tensor(
