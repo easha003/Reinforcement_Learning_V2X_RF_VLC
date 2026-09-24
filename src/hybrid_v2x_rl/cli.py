@@ -11,10 +11,12 @@ from rich.console import Console
 from rich.table import Table
 
 from hybrid_v2x_rl import __version__
+from hybrid_v2x_rl.agents.trace_training import run_trace_smoke_training
 from hybrid_v2x_rl.config import config_hash as hash_config
 from hybrid_v2x_rl.config import headline_config_layers, load_config
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.doctor import doctor_succeeded, run_doctor
+from hybrid_v2x_rl.mean_field.deterministic_rollout import trace_source
 from hybrid_v2x_rl.mean_field.frame_campaign import validate_frame_campaign
 from hybrid_v2x_rl.mean_field.frames import TraceCatalog
 from hybrid_v2x_rl.mobility.pipeline import (
@@ -39,8 +41,14 @@ frames_app = typer.Typer(
     help="Population-frame replay and validation commands.",
     no_args_is_help=True,
 )
+training_app = typer.Typer(
+    name="training",
+    help="Trace-backed constrained-policy training commands.",
+    no_args_is_help=True,
+)
 app.add_typer(mobility_app)
 app.add_typer(frames_app)
+app.add_typer(training_app)
 console = Console()
 
 
@@ -277,6 +285,95 @@ def frames_validate_campaign(
             f"{totals['decision_pair_episodes']} pair episodes"
         )
         console.print(f"campaign report: {destination}")
+
+
+@training_app.command("smoke")
+def training_smoke(
+    trace_id: Annotated[
+        str,
+        typer.Option("--trace-id", help="Configured training trace identifier."),
+    ] = "synthetic-d10-train-000",
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="New or empty artifact directory for the smoke run.",
+            file_okay=False,
+        ),
+    ] = Path("artifacts/logs/phase8-smoke-d10-seed1001"),
+    max_frames: Annotated[
+        int,
+        typer.Option(
+            "--max-frames",
+            min=2,
+            help="Consecutive frames; the last is the bootstrap source.",
+        ),
+    ] = 5,
+    policy_seed: Annotated[
+        int,
+        typer.Option("--policy-seed", min=0, help="Declared policy seed."),
+    ] = 1001,
+    environment_seed: Annotated[
+        int | None,
+        typer.Option(
+            "--environment-seed",
+            min=0,
+            help="Optional reset seed; defaults to training.root_seed.",
+        ),
+    ] = None,
+    config: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--config",
+            help="Layered YAML configuration path; repeat in merge order.",
+            exists=True,
+        ),
+    ] = None,
+    project_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--project-root",
+            help="Project root containing configs/ and artifacts/traces/.",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the complete machine-readable report."),
+    ] = False,
+) -> None:
+    """Run one bounded primal-dual PPO iteration on a real training trace."""
+
+    root = project_root if project_root is not None else Path.cwd()
+    layers = tuple(config) if config else headline_config_layers(root)
+    destination = output if output.is_absolute() else root / output
+    try:
+        resolved = load_config(layers, project_root=root)
+        result = run_trace_smoke_training(
+            resolved,
+            trace_source(root, trace_id),
+            output_root=destination,
+            policy_seed=policy_seed,
+            environment_seed=environment_seed,
+            max_frames=max_frames,
+        )
+    except HybridV2XError as error:
+        console.print(f"[red]{type(error).__name__}: {error}[/red]")
+        raise typer.Exit(code=1) from error
+
+    if json_output:
+        typer.echo(json.dumps(dict(result.report), indent=2, sort_keys=True))
+    else:
+        density = next(row for row in result.metrics.densities if row.sample_count > 0)
+        console.print(
+            "[green]Phase 8 trace smoke training passed[/green]: "
+            f"{result.metrics.rollout_transitions} rollout transitions, "
+            f"{result.metrics.learning_rows} PPO rows, "
+            f"dual={density.dual_after:.6g}"
+        )
+        console.print(f"report: {result.report_path}")
+        console.print(f"checkpoint: {result.checkpoint.path}")
 
 
 if __name__ == "__main__":

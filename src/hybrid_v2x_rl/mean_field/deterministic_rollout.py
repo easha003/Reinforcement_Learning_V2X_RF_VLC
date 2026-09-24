@@ -44,7 +44,10 @@ from hybrid_v2x_rl.mean_field.normalization import (
     ObservationNormalizationState,
     ObservationNormalizer,
 )
-from hybrid_v2x_rl.mean_field.packet_outcomes import assemble_frame_outcomes
+from hybrid_v2x_rl.mean_field.packet_outcomes import (
+    FramePacketOutcomes,
+    assemble_frame_outcomes,
+)
 from hybrid_v2x_rl.mean_field.policy_interface import (
     OracleChannelTruth,
     PopulationPolicy,
@@ -67,6 +70,19 @@ class DeterministicRolloutError(HybridV2XError):
 
 class _Digest(Protocol):
     def update(self, data: bytes) -> object: ...
+
+
+class PopulationRolloutObserver(Protocol):
+    """Read-only hook over completed frames from the authoritative rollout path."""
+
+    def observe_frame(
+        self,
+        *,
+        decision: PopulationPolicyFrame,
+        actions: tuple[PolicyAction, ...],
+        outcomes: FramePacketOutcomes,
+        boundary: FrameReturnBoundary,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,6 +471,7 @@ def run_policy_rollout_with_state(
     max_frames: int | None = None,
     normalization_state: ObservationNormalizationState | Mapping[str, object] | None = None,
     freeze_normalization_at_end: bool = False,
+    frame_observer: PopulationRolloutObserver | None = None,
 ) -> PolicyRolloutResult:
     """Run any population policy through the one authoritative environment path.
 
@@ -481,6 +498,12 @@ def run_policy_rollout_with_state(
         raise DeterministicRolloutError("max_frames must be positive or None")
     if type(freeze_normalization_at_end) is not bool:
         raise DeterministicRolloutError("freeze_normalization_at_end must be boolean")
+    if frame_observer is not None and not callable(
+        getattr(frame_observer, "observe_frame", None)
+    ):
+        raise DeterministicRolloutError(
+            "frame_observer must provide an observe_frame method"
+        )
     canonical_policy = policy.name
 
     seed_state = EnvironmentSeedState.from_config(
@@ -665,6 +688,13 @@ def run_policy_rollout_with_state(
             for pair_id in boundary.bootstrap_pair_ids
         }
         boundary.as_step_info(final_observation=final_references)
+        if frame_observer is not None:
+            frame_observer.observe_frame(
+                decision=decision,
+                actions=tuple(proposals),
+                outcomes=outcomes,
+                boundary=boundary,
+            )
 
         for outcome in outcomes.pair_outcomes:
             spec = action_resources(outcome.action)
@@ -887,6 +917,7 @@ __all__ = [
     "DeterministicRolloutError",
     "DeterministicRolloutReport",
     "EpisodeClusterTally",
+    "PopulationRolloutObserver",
     "PolicyRolloutResult",
     "canonical_policy_name",
     "run_deterministic_rollout",

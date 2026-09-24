@@ -621,20 +621,20 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
 
 ### Training sequence
 
-1. Overfit a tiny deterministic environment to confirm the full learning path.
-2. Run short smoke training on one trace and one traffic density.
-3. Profile environment throughput, memory, and bottlenecks on the MacBook Pro M2.
-4. Train jointly across densities 10, 20, and 30 vehicles per lane-kilometer.
-5. Apply the reliability curriculum:
+1. [x] Overfit a tiny deterministic environment to confirm the full learning path.
+2. [x] Run short smoke training on one trace and one traffic density.
+3. [ ] Profile environment throughput, memory, and bottlenecks on the MacBook Pro M2.
+4. [ ] Train jointly across densities 10, 20, and 30 vehicles per lane-kilometer.
+5. [ ] Apply the reliability curriculum:
 
    ```text
    1e-2 → 1e-3 → 1e-4
    ```
 
-6. Add a `1e-5` target only as a declared secondary experiment after the `1e-4` pipeline is stable and statistically supportable.
-7. Train five independent policy seeds.
-8. Select checkpoints using validation feasibility first and resource cost second.
-9. Freeze all choices before opening the test split.
+6. [ ] Add a `1e-5` target only as a declared secondary experiment after the `1e-4` pipeline is stable and statistically supportable.
+7. [ ] Train five independent policy seeds.
+8. [ ] Select checkpoints using validation feasibility first and resource cost second.
+9. [ ] Freeze all choices before opening the test split.
 
 ### Initial configuration to profile
 
@@ -844,5 +844,8 @@ report. The complete held-out population evidence produces a Phase 6 PPO gate
 decision of `go`; the bounded history sample remains diagnostic. Phase 7 is
 complete: the independently tested actor, critics, estimators, PPO updater,
 dual ascent, metrics, and complete checkpoint state now pass an end-to-end
-tiny-CMDP test whose constrained and reward-only optima disagree. Begin Phase 8
-with short smoke training on one trace and one traffic density.
+tiny-CMDP test whose constrained and reward-only optima disagree. Phase 8 now
+has a reproducible one-iteration smoke run on the real density-10 training
+trace, including metrics and a complete checkpoint; it is explicitly not a
+convergence or feasibility result. Next, profile environment throughput,
+optimizer time, memory, and bottlenecks on the MacBook Pro M2.
