@@ -579,6 +579,8 @@ def _final_observation_values(
     current: ObservedFrameSample,
     following: ObservedFrameSample,
     updater: PPOUpdater,
+    critic_builder: CentralizedCriticBuilder,
+    density_veh_per_lane_km: float,
 ) -> PairedCriticValues | None:
     """Evaluate old-ID final rows with the next population's global context."""
 
@@ -594,9 +596,11 @@ def _final_observation_values(
             "final observations do not use canonical bootstrap-pair order"
         )
     next_observation = following.policy.observation
-    if following.policy.critic_observations.shape[0] == 0:
+    actor_width = critic_builder.schema.actor_width
+    critic_width = critic_builder.schema.critic_width
+    if following.policy.critic_observations.shape[1] != critic_width:
         raise TraceTrainingError(
-            "internal truncation bootstrapping requires a non-empty next population"
+            "next critic observations do not match the centralized schema width"
         )
 
     final_rows: list[torch.Tensor] = []
@@ -622,13 +626,25 @@ def _final_observation_values(
         )
 
     actor = torch.stack(final_rows)
-    actor_width = actor.shape[1]
-    critic_width = following.policy.critic_observations.shape[1]
-    if critic_width <= actor_width:
+    if actor.shape[1] != actor_width or critic_width <= actor_width:
         raise TraceTrainingError(
             "next critic observations are missing their population-global suffix"
         )
-    global_suffix = following.policy.critic_observations[0, actor_width:]
+    if following.policy.critic_observations.shape[0]:
+        global_suffix = following.policy.critic_observations[0, actor_width:]
+    else:
+        # Ordinary empty frames correctly expose no critic rows and no defined
+        # population mean. An old-ID final row still needs one centralized
+        # bootstrap input, so use the explicit neutral empty-set reduction:
+        # zero actor mean, the trace density, and log1p(population=0).
+        empty_summary = np.concatenate(
+            (
+                np.zeros(actor_width, dtype=np.float32),
+                critic_builder.schema.density_one_hot(density_veh_per_lane_km),
+                np.zeros(1, dtype=np.float32),
+            )
+        )
+        global_suffix = torch.tensor(empty_summary, dtype=torch.float32)
     final_critic = torch.cat(
         (actor, global_suffix.unsqueeze(0).expand(len(pair_ids), -1)),
         dim=1,
@@ -650,6 +666,7 @@ def prepare_rollout(
     optimized = frames[:-1]
     if not optimized:
         raise TraceTrainingError("smoke rollout contains no optimization frames")
+    critic_builder = CentralizedCriticBuilder.from_config(config)
     rows: list[_LearningRow] = []
     all_rewards: list[torch.Tensor] = []
     all_costs: list[torch.Tensor] = []
@@ -679,6 +696,8 @@ def prepare_rollout(
             current=current,
             following=following,
             updater=updater,
+            critic_builder=critic_builder,
+            density_veh_per_lane_km=density_veh_per_lane_km,
         )
         lifecycle = assemble_lifecycle_bootstrap(
             step_output=step,

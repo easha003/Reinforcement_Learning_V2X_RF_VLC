@@ -139,6 +139,45 @@ def truncation_source(tmp_path: Path, config) -> FrameTraceSource:
     return FrameTraceSource.discover(artifact.path, expected_split="train")
 
 
+@pytest.fixture()
+def empty_following_population_source(tmp_path: Path, config) -> FrameTraceSource:
+    times = tuple(0.05 * index for index in range(11))
+    vehicles = [
+        _vehicle(time_s, vehicle_index)
+        for time_s in times
+        for vehicle_index in range(1, 3)
+    ]
+    pair = {
+        "trace_id": TRACE_ID,
+        "pair_id": "pair-old",
+        "tx_id": "veh-1",
+        "rx_id": "veh-2",
+        "start_s": 0.0,
+        "end_s": 0.2,
+        "duration_s": 0.2,
+        "initial_distance_m": 9.0,
+        "route_id": "route-0",
+        "eligibility_reason": "max_duration",
+        "has_intervening_vehicle": False,
+    }
+    artifact = MobilityTraceWriter(
+        ArtifactStore(tmp_path / "artifacts"),
+        rows_per_part=8,
+    ).write(
+        trace_id=TRACE_ID,
+        vehicles=vehicles,
+        signals=(),
+        pairs=(pair,),
+        network_definition="{}",
+        route_definition="{}",
+        resolved_config_yaml="test: empty-bootstrap-population\n",
+        config_hash=config_hash(config),
+        code_version="test",
+        random_seeds={"mobility": 37},
+    )
+    return FrameTraceSource.discover(artifact.path, expected_split="train")
+
+
 def test_trace_smoke_run_publishes_metrics_and_complete_checkpoint(
     config,
     source: FrameTraceSource,
@@ -247,3 +286,26 @@ def test_trace_training_bootstraps_internal_truncation_from_old_id_final_row(
         restore_global_rng=False,
     )
     assert restored.counters.episodes_completed >= 1
+
+
+def test_internal_truncation_bootstraps_across_an_empty_ordinary_population(
+    config,
+    empty_following_population_source: FrameTraceSource,
+    tmp_path: Path,
+) -> None:
+    result = run_trace_smoke_training(
+        config,
+        empty_following_population_source,
+        output_root=tmp_path / "empty-bootstrap-population",
+        policy_seed=1001,
+        environment_seed=71,
+        max_frames=4,
+    )
+
+    environment = result.report["environment_report"]
+    assert environment["internal_truncations"] == 1
+    assert result.metrics.rollout_transitions == 3
+    assert result.metrics.learning_rows == 2
+    assert result.metrics.ppo.optimizer_rows == (
+        config.training.update_epochs * result.metrics.learning_rows
+    )
