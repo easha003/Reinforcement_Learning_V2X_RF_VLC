@@ -139,6 +139,9 @@ The integration tests establish that:
 Focused lint, formatting, and static typing pass. The complete repository test
 suite passes 1,382 tests with 2 expected artifact-dependent skips.
 
-The next operational task is a bounded multi-iteration pilot on the configured
-training traces, including a real checkpoint/resume cycle and artifact audit,
-before committing to the full 10-million-transition run for each policy seed.
+The bounded configured-trace checkpoint/resume pilot is documented in
+`PHASE8_CONFIGURED_RESUME_PILOT.md`. Resume continuity and artifact immutability
+passed, but the pilot found that bounded segments always restart at frame 0 and
+therefore touch at most 20 of each trace's 9,000 decision frames. The full
+10-million-transition campaign is on hold until deterministic, resumable
+within-trace window progression passes its own coverage audit.

@@ -631,6 +631,11 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      shared PPO/dual update across all three densities.
    - [x] Extend the one-iteration boundary to resumable multi-iteration training
      under the configured transition budget.
+   - [x] Complete a two-update configured-trace checkpoint/resume pilot and
+     audit counter, RNG, metric, hash, and immutable-artifact continuity.
+   - [ ] Add deterministic, checkpoint-resumable within-trace window progression;
+     the pilot proved that bounded segments currently revisit only frames 0–19
+     of each 9,000-frame training trace.
 5. [ ] Apply the reliability curriculum:
 
    ```text
@@ -875,5 +880,10 @@ reliability curriculum advances from cumulative acted transitions; and exact
 pre-round accounting prevents the configured transition budget from being
 crossed. Split-versus-uninterrupted equivalence and budget-tail behavior are
 covered by integration tests, and the complete suite passes 1,382 tests with 2
-expected artifact-dependent skips. The next task is a bounded configured-trace
-resume pilot before the full per-seed training campaign.
+expected artifact-dependent skips. A two-update configured-trace resume pilot
+also passed checkpoint, counter, dual, RNG, metric-order, restoration, and
+artifact-immutability audits. It exposed a blocking coverage defect: bounded
+segments always restart from frame 0 and touch at most 20 of each trace's 9,000
+decision frames. The next task is deterministic checkpoint-resumable
+within-trace window progression; the full per-seed campaign remains on hold
+until that boundary passes a coverage audit.
