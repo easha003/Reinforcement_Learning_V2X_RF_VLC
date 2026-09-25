@@ -152,6 +152,61 @@ def test_random_rollout_is_bit_replayable_and_seed_addressed(config, source) -> 
     assert changed.fingerprint != first.fingerprint
 
 
+def test_nonzero_trace_window_is_replayable_and_reported_in_physical_coordinates(
+    config,
+    source,
+) -> None:
+    first = run_deterministic_rollout(
+        config,
+        source,
+        policy="random",
+        environment_seed=81,
+        policy_seed=92,
+        start_frame_index=1,
+        max_frames=2,
+    )
+    repeated = run_deterministic_rollout(
+        config,
+        source,
+        policy="random",
+        environment_seed=81,
+        policy_seed=92,
+        start_frame_index=1,
+        max_frames=2,
+    )
+    shifted = run_deterministic_rollout(
+        config,
+        source,
+        policy="random",
+        environment_seed=81,
+        policy_seed=92,
+        start_frame_index=2,
+        max_frames=2,
+    )
+
+    assert repeated == first
+    assert first.requested_start_frame_index == 1
+    assert first.first_frame_index == 1
+    assert first.last_frame_index == 2
+    assert first.frames == 2
+    assert first.available_frames == 4
+    assert not first.source_exhausted
+    assert first.transitions == 6
+    assert shifted.fingerprint != first.fingerprint
+
+
+@pytest.mark.parametrize("start", (-1, True))
+def test_rollout_rejects_an_invalid_trace_window_start(config, source, start: object) -> None:
+    with pytest.raises(DeterministicRolloutError, match="start_frame_index"):
+        run_deterministic_rollout(
+            config,
+            source,
+            policy="cycle",
+            start_frame_index=start,  # type: ignore[arg-type]
+            max_frames=2,
+        )
+
+
 def test_scripted_cycle_composes_shared_pool_and_cutoff(config, source) -> None:
     report = run_deterministic_rollout(
         config,

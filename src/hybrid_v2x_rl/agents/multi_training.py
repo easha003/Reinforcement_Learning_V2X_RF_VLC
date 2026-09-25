@@ -37,6 +37,11 @@ from hybrid_v2x_rl.agents.trace_training import (
     optimize_ppo,
     prepare_rollout,
 )
+from hybrid_v2x_rl.agents.trace_windows import (
+    TRACE_WINDOW_SCHEDULE_SCHEMA,
+    TraceWindowSelection,
+    select_trace_window,
+)
 from hybrid_v2x_rl.agents.training_metrics import (
     TrainingIterationMetrics,
     TrainingMetricsJSONL,
@@ -53,7 +58,7 @@ from hybrid_v2x_rl.mean_field.frames import (
 )
 from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizer
 
-MULTI_TRAINING_ITERATION_SCHEMA: Final = "hybrid-rf-vlc-rl.joint-density-training-iteration.v1"
+MULTI_TRAINING_ITERATION_SCHEMA: Final = "hybrid-rf-vlc-rl.joint-density-training-iteration.v2"
 MULTI_TRAINING_SESSION_SCHEMA: Final = "hybrid-rf-vlc-rl.joint-density-training-session.v1"
 _ACTION_STREAM_XOR: Final = 0xA17C_D315_5EED_1001
 _MINIBATCH_STREAM_XOR: Final = 0xB47C_D315_5EED_1002
@@ -482,7 +487,8 @@ def _execute_iteration(
     balanced_rounds = 0
     observed_packets_per_joint_frame: float | None = None
     budget_limited = False
-    transition_cache: dict[tuple[Path, int], int] = {}
+    reader_cache: dict[Path, PopulationFrameReader] = {}
+    transition_cache: dict[tuple[Path, int, int], int] = {}
 
     while accumulated_packets < rollout_target:
         frame_limit = (
@@ -494,23 +500,28 @@ def _execute_iteration(
             if max_frames_per_trace is None
             else max_frames_per_trace
         )
-        selected = tuple(
-            (
-                density,
-                candidates[
-                    (runtime.counters.completed_iterations + balanced_rounds) % len(candidates)
-                ],
+        selected: list[tuple[float, FrameTraceSource, TraceWindowSelection]] = []
+        for density, candidates in sorted(grouped.items()):
+            source = candidates[
+                (runtime.counters.completed_iterations + balanced_rounds) % len(candidates)
+            ]
+            reader = _population_reader(config, source, cache=reader_cache)
+            window = select_trace_window(
+                available_frames=reader.decision_frame_count,
+                requested_frames=frame_limit,
+                completed_iterations=runtime.counters.completed_iterations,
+                balanced_round=balanced_rounds,
             )
-            for density, candidates in sorted(grouped.items())
-        )
+            selected.append((density, source, window))
         projected_round = sum(
             _segment_environment_transitions(
                 config,
                 source,
-                frame_limit=frame_limit,
+                window=window,
+                reader_cache=reader_cache,
                 cache=transition_cache,
             )
-            for _, source in selected
+            for _, source, window in selected
         )
         projected_total = (
             runtime.counters.environment_transitions + environment_transitions + projected_round
@@ -523,7 +534,7 @@ def _execute_iteration(
 
         packets_before_round = accumulated_packets
         environment_before_round = environment_transitions
-        for density, source in selected:
+        for density, source, window in selected:
             environment_seed = int(runtime.numpy_generator.integers(0, 2**63))
             collector = TracePPOCollector(
                 config=config,
@@ -537,15 +548,28 @@ def _execute_iteration(
                 policy=collector,
                 environment_seed=environment_seed,
                 policy_seed=policy_seed,
+                start_frame_index=window.start_frame_index,
                 max_frames=frame_limit,
                 normalization_state=normalization_state,
                 frame_observer=collector,
             )
             frames = collector.frames
-            if len(frames) < 2:
+            if len(frames) != window.window_frames or len(frames) < 2:
                 raise JointDensityTrainingError(
-                    "a joint-density trace segment needs at least two acted frames",
-                    context={"trace_id": source.trace_id, "frames": len(frames)},
+                    "a joint-density trace window did not produce its declared frames",
+                    context={
+                        "trace_id": source.trace_id,
+                        "frames": len(frames),
+                        "expected": window.window_frames,
+                    },
+                )
+            if (
+                rollout.report.first_frame_index != window.start_frame_index
+                or rollout.report.last_frame_index != window.end_frame_index
+            ):
+                raise JointDensityTrainingError(
+                    "rollout report does not match the scheduled trace window",
+                    context={"trace_id": source.trace_id},
                 )
             prepared = prepare_rollout(
                 frames=frames,
@@ -572,6 +596,7 @@ def _execute_iteration(
                     "environment_seed": environment_seed,
                     "requested_max_frames": frame_limit,
                     "frames": rollout.report.frames,
+                    "trace_window": window.as_dict(),
                     "source_exhausted": rollout.report.source_exhausted,
                     "environment_transitions": rollout.report.transitions,
                     "rollout_transitions": prepared.rollout_transitions,
@@ -652,31 +677,56 @@ def _segment_environment_transitions(
     config: ProjectConfig,
     source: FrameTraceSource,
     *,
-    frame_limit: int,
-    cache: dict[tuple[Path, int], int],
+    window: TraceWindowSelection,
+    reader_cache: dict[Path, PopulationFrameReader],
+    cache: dict[tuple[Path, int, int], int],
 ) -> int:
-    key = (source.path.resolve(strict=True), frame_limit)
+    source_path = source.path.resolve(strict=True)
+    key = (source_path, window.start_frame_index, window.end_frame_index)
     cached = cache.get(key)
     if cached is not None:
         return cached
-    reader = PopulationFrameReader(
-        source,
-        generation_period_s=config.service.generation_period_s,
-        expected_config_hash=config_hash(config),
-    )
-    final_frame = min(reader.last_frame_index, frame_limit - 1)
+    reader = _population_reader(config, source, cache=reader_cache)
     transitions = sum(
-        max(0, min(episode.last_frame, final_frame) - episode.first_frame + 1)
+        max(
+            0,
+            min(episode.last_frame, window.end_frame_index)
+            - max(episode.first_frame, window.start_frame_index)
+            + 1,
+        )
         for episode in reader.episode_schedule
-        if episode.first_frame <= final_frame
+        if episode.first_frame <= window.end_frame_index
+        and episode.last_frame >= window.start_frame_index
     )
     if transitions <= 0:
         raise JointDensityTrainingError(
-            "a selected training segment has no acted pair transitions",
-            context={"trace_id": source.trace_id, "frame_limit": frame_limit},
+            "a selected training trace window has no acted pair transitions",
+            context={
+                "trace_id": source.trace_id,
+                "start_frame_index": window.start_frame_index,
+                "end_frame_index": window.end_frame_index,
+            },
         )
     cache[key] = transitions
     return transitions
+
+
+def _population_reader(
+    config: ProjectConfig,
+    source: FrameTraceSource,
+    *,
+    cache: dict[Path, PopulationFrameReader],
+) -> PopulationFrameReader:
+    source_path = source.path.resolve(strict=True)
+    reader = cache.get(source_path)
+    if reader is None:
+        reader = PopulationFrameReader(
+            source,
+            generation_period_s=config.service.generation_period_s,
+            expected_config_hash=config_hash(config),
+        )
+        cache[source_path] = reader
+    return reader
 
 
 def _iteration_payload(
@@ -698,6 +748,7 @@ def _iteration_payload(
         "policy_seed": policy_seed,
         "iteration": outcome.metrics.iteration,
         "device": "cpu",
+        "trace_window_schedule": TRACE_WINDOW_SCHEDULE_SCHEMA,
         "curriculum": {
             **outcome.curriculum.as_dict(),
             "boundary_crossed": stage_overshoot > 0
@@ -827,6 +878,34 @@ def _validate_existing_history(
         )
     if resume_checkpoint.name not in actual_checkpoints:
         raise JointDensityTrainingError("resume checkpoint is absent from artifact history")
+    for completion in range(1, counters.completed_iterations + 1):
+        report_path = destination / "iterations" / f"iteration-{completion:06d}.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise JointDensityTrainingError(
+                "resume iteration history is unreadable",
+                artifact_path=report_path,
+            ) from exc
+        segments = report.get("segments") if isinstance(report, dict) else None
+        if (
+            not isinstance(report, dict)
+            or report.get("schema") != MULTI_TRAINING_ITERATION_SCHEMA
+            or report.get("iteration") != completion - 1
+            or report.get("trace_window_schedule") != TRACE_WINDOW_SCHEDULE_SCHEMA
+            or not isinstance(segments, list)
+            or not segments
+            or any(
+                not isinstance(segment, dict)
+                or not isinstance(segment.get("trace_window"), dict)
+                or segment["trace_window"].get("schema") != TRACE_WINDOW_SCHEDULE_SCHEMA
+                for segment in segments
+            )
+        ):
+            raise JointDensityTrainingError(
+                "resume iteration history predates or violates the trace-window contract",
+                artifact_path=report_path,
+            )
 
 
 def _checkpoint_summary(

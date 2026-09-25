@@ -42,6 +42,16 @@ keeps source scheduling deterministic across process boundaries. Environment
 seeds, policy samples, and minibatch permutations continue from the restored
 named generators rather than being reseeded.
 
+The physical trace window is also reconstructed without a mutable cursor. Its
+versioned schedule combines the completed-iteration and local-round indices,
+then maps that position into the valid start range for the requested window
+length. Reports persist the physical start/end, cycle, and wrap event. A
+nonzero start resets causal histories and delayed mean-field state while
+retaining physical pair lifecycle steps. Exact budget projection intersects
+pair episodes with the selected interval. See
+`PHASE8_TRACE_WINDOW_PROGRESSION.md` for the complete contract and configured
+audit.
+
 A resume is accepted only from the latest checkpoint in the requested output
 root. Its filename, checkpoint counters, complete checkpoint/report sequence,
 and append-only metric history must agree. The optional
@@ -136,12 +146,12 @@ The integration tests establish that:
 - a final balanced round that would cross the total transition budget is not
   started.
 
-Focused lint, formatting, and static typing pass. The complete repository test
-suite passes 1,382 tests with 2 expected artifact-dependent skips.
+Focused lint and static typing pass. The complete repository test suite passes
+1,405 tests with 2 expected artifact-dependent skips.
 
-The bounded configured-trace checkpoint/resume pilot is documented in
-`PHASE8_CONFIGURED_RESUME_PILOT.md`. Resume continuity and artifact immutability
-passed, but the pilot found that bounded segments always restart at frame 0 and
-therefore touch at most 20 of each trace's 9,000 decision frames. The full
-10-million-transition campaign is on hold until deterministic, resumable
-within-trace window progression passes its own coverage audit.
+The original bounded configured-trace checkpoint/resume pilot is documented in
+`PHASE8_CONFIGURED_RESUME_PILOT.md`. It found that bounded segments always
+restarted at frame 0. That defect is now closed: the follow-up audit in
+`PHASE8_TRACE_WINDOW_PROGRESSION.md` reached frames 0, 997, 4,099, and 5,096 in
+two updates and produced byte-identical split/resumed and uninterrupted
+checkpoints. The full campaign is no longer held for trace-window progression.

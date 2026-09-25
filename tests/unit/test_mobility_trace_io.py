@@ -112,6 +112,42 @@ def test_trace_writer_partitions_and_reader_round_trips_exact_records(
     assert verify_mobility_trace(path) == reader.report
 
 
+def test_vehicle_reader_filters_an_inclusive_time_window(tmp_path: Path) -> None:
+    store, _ = _write_trace(tmp_path)
+    reader = MobilityTraceReader.from_store(store, "trace-001")
+
+    selected = list(
+        reader.iter_vehicles(
+            batch_size=1,
+            start_time_s=0.05,
+            end_time_s=0.05,
+        )
+    )
+
+    assert selected == _vehicles()[2:4]
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    ((-1.0, None), (float("nan"), None), (0.1, 0.0), (True, None)),
+)
+def test_vehicle_reader_rejects_invalid_time_windows(
+    tmp_path: Path,
+    start: object,
+    end: object,
+) -> None:
+    store, _ = _write_trace(tmp_path)
+    reader = MobilityTraceReader.from_store(store, "trace-001")
+
+    with pytest.raises(ValueError):
+        list(
+            reader.iter_vehicles(
+                start_time_s=start,  # type: ignore[arg-type]
+                end_time_s=end,  # type: ignore[arg-type]
+            )
+        )
+
+
 def test_persisted_schemas_have_exact_column_order_types_and_nullability(
     tmp_path: Path,
 ) -> None:

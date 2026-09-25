@@ -23,6 +23,7 @@ TRACE_ARTIFACT_FAMILY = "traces"
 TRACE_ARTIFACT_TYPE = "mobility_trace"
 TRACE_SCHEMA_VERSION = "1.0.0"
 _SCHEMA_METADATA = {b"hybrid_v2x_rl.trace_schema_version": TRACE_SCHEMA_VERSION.encode()}
+_TRACE_TIME_TOLERANCE_S = 1e-9
 
 VEHICLE_TRACE_SCHEMA = pa.schema(
     [
@@ -447,13 +448,53 @@ class MobilityTraceReader:
     def signals_path(self) -> Path:
         return self.artifact.path / "signals.parquet"
 
-    def iter_vehicles(self, *, batch_size: int = 65_536) -> Iterator[VehicleTraceRecord]:
-        """Yield vehicle records in partition and row order without full loading."""
+    def iter_vehicles(
+        self,
+        *,
+        batch_size: int = 65_536,
+        start_time_s: float | None = None,
+        end_time_s: float | None = None,
+    ) -> Iterator[VehicleTraceRecord]:
+        """Yield an inclusive chronological time range without full loading.
+
+        Parquet row-group statistics are used to avoid decoding partitions that
+        cannot intersect the requested range. The default ``None`` bounds retain
+        the original complete-stream behavior.
+        """
 
         _validate_batch_size(batch_size)
+        start = _optional_trace_time(start_time_s, name="start_time_s")
+        end = _optional_trace_time(end_time_s, name="end_time_s")
+        if start is not None and end is not None and start > end:
+            raise ValueError("start_time_s cannot exceed end_time_s")
         for path in self.vehicle_part_paths:
             parquet = pq.ParquetFile(path)
-            for batch in parquet.iter_batches(batch_size=batch_size):
+            row_groups = _intersecting_time_row_groups(
+                parquet,
+                start_time_s=start,
+                end_time_s=end,
+            )
+            if not row_groups:
+                continue
+            for batch in parquet.iter_batches(
+                batch_size=batch_size,
+                row_groups=row_groups,
+            ):
+                times = batch.column(batch.schema.get_field_index("time_s"))
+                mask = None
+                if start is not None:
+                    mask = pc.greater_equal(
+                        times,
+                        pa.scalar(start - _TRACE_TIME_TOLERANCE_S),
+                    )
+                if end is not None:
+                    upper = pc.less_equal(
+                        times,
+                        pa.scalar(end + _TRACE_TIME_TOLERANCE_S),
+                    )
+                    mask = upper if mask is None else pc.and_(mask, upper)
+                if mask is not None:
+                    batch = batch.filter(mask)
                 for row in batch.to_pylist():
                     yield _vehicle_from_mapping(row)
 
@@ -728,6 +769,44 @@ def _validate_record_trace_id(actual: str, expected: str) -> None:
 def _validate_batch_size(value: int) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError("batch_size must be a positive integer")
+
+
+def _optional_trace_time(value: float | None, *, name: str) -> float | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, int | float)
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        or float(value) < 0.0
+    ):
+        raise ValueError(f"{name} must be finite, nonnegative, or None")
+    return float(value)
+
+
+def _intersecting_time_row_groups(
+    parquet: pq.ParquetFile,
+    *,
+    start_time_s: float | None,
+    end_time_s: float | None,
+) -> list[int]:
+    time_column = parquet.schema_arrow.get_field_index("time_s")
+    if time_column < 0:  # pragma: no cover - verified trace schema makes this unreachable.
+        raise TraceIntegrityError("vehicle Parquet is missing time_s")
+    selected: list[int] = []
+    for index in range(parquet.metadata.num_row_groups):
+        statistics = parquet.metadata.row_group(index).column(time_column).statistics
+        if statistics is None or not statistics.has_min_max:
+            selected.append(index)
+            continue
+        minimum = float(statistics.min)
+        maximum = float(statistics.max)
+        if start_time_s is not None and maximum < start_time_s - _TRACE_TIME_TOLERANCE_S:
+            continue
+        if end_time_s is not None and minimum > end_time_s + _TRACE_TIME_TOLERANCE_S:
+            continue
+        selected.append(index)
+    return selected
 
 
 def _require_nonempty_strings(**values: str) -> None:

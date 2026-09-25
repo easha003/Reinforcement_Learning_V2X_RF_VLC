@@ -1,5 +1,17 @@
 # Phase 8 Configured-Trace Resume Pilot
 
+## Resolution (2026-09-25)
+
+The temporal-coverage defect documented below is now closed. Deterministic,
+checkpoint-resumable within-trace window progression passed unit, integration,
+and configured nine-trace audits, including byte-identical split and
+uninterrupted checkpoints. See `PHASE8_TRACE_WINDOW_PROGRESSION.md` for the
+versioned schedule, reset semantics, coverage evidence, and artifact hashes.
+
+The original v1 pilot remains a historical record and cannot be resumed by the
+v2 trainer because it lacks trace-window metadata. Its findings below are
+retained to show why the new boundary was required.
+
 ## Verdict
 
 The configured-trace checkpoint/resume mechanism passed its operational audit,

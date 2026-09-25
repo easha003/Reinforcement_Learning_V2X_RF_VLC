@@ -149,8 +149,11 @@ class DeterministicRolloutReport:
     policy: str
     environment_seed: int
     policy_seed: int
+    requested_start_frame_index: int
     requested_max_frames: int | None
     available_frames: int
+    first_frame_index: int
+    last_frame_index: int
     frames: int
     source_exhausted: bool
     nonempty_frames: int
@@ -182,7 +185,10 @@ class DeterministicRolloutReport:
         integer_fields = (
             "environment_seed",
             "policy_seed",
+            "requested_start_frame_index",
             "available_frames",
+            "first_frame_index",
+            "last_frame_index",
             "frames",
             "nonempty_frames",
             "transitions",
@@ -212,8 +218,30 @@ class DeterministicRolloutReport:
             or self.requested_max_frames <= 0
         ):
             raise DeterministicRolloutError("requested_max_frames must be positive or None")
+        if self.available_frames <= 0:
+            raise DeterministicRolloutError("available_frames must be positive")
+        if not 0 <= self.requested_start_frame_index < self.available_frames:
+            raise DeterministicRolloutError(
+                "requested_start_frame_index must identify an available frame"
+            )
+        if self.frames <= 0:
+            raise DeterministicRolloutError("a rollout report must contain a frame")
+        if self.first_frame_index != self.requested_start_frame_index:
+            raise DeterministicRolloutError(
+                "first_frame_index must equal the requested window start"
+            )
+        if self.last_frame_index != self.first_frame_index + self.frames - 1:
+            raise DeterministicRolloutError(
+                "last_frame_index does not match the processed frame count"
+            )
+        if self.last_frame_index >= self.available_frames:
+            raise DeterministicRolloutError("rollout window exceeds available frames")
         if type(self.source_exhausted) is not bool:
             raise DeterministicRolloutError("source_exhausted must be boolean")
+        if self.source_exhausted != (self.last_frame_index == self.available_frames - 1):
+            raise DeterministicRolloutError(
+                "source_exhausted does not match the final physical frame"
+            )
         if self.split not in ("train", "validation", "test"):
             raise DeterministicRolloutError("rollout split must be train, validation, or test")
         if type(self.normalization_updates_enabled) is not bool:
@@ -456,6 +484,7 @@ def run_policy_rollout_with_state(
     policy: PopulationPolicy,
     environment_seed: int | None = None,
     policy_seed: int = 0,
+    start_frame_index: int = 0,
     max_frames: int | None = None,
     normalization_state: ObservationNormalizationState | Mapping[str, object] | None = None,
     freeze_normalization_at_end: bool = False,
@@ -463,9 +492,10 @@ def run_policy_rollout_with_state(
 ) -> PolicyRolloutResult:
     """Run any population policy through the one authoritative environment path.
 
-    ``max_frames`` is a diagnostic processing cutoff.  It does not manufacture
-    truncation flags for still-active pairs; only trace lifecycle metadata is
-    counted as a training boundary.
+    ``start_frame_index`` begins a fresh sampled episode at that physical trace
+    instant. ``max_frames`` is a diagnostic processing cutoff. Neither option
+    manufactures truncation flags for still-active pairs; only trace lifecycle
+    metadata is counted as a training boundary.
     """
 
     if not isinstance(config, ProjectConfig):
@@ -480,6 +510,12 @@ def run_policy_rollout_with_state(
         raise DeterministicRolloutError(
             "population policy oracle declaration must be boolean"
         )
+    if (
+        not isinstance(start_frame_index, int)
+        or isinstance(start_frame_index, bool)
+        or start_frame_index < 0
+    ):
+        raise DeterministicRolloutError("start_frame_index must be a nonnegative integer")
     if max_frames is not None and (
         not isinstance(max_frames, int) or isinstance(max_frames, bool) or max_frames <= 0
     ):
@@ -499,7 +535,10 @@ def run_policy_rollout_with_state(
         reset_seed=environment_seed,
     )
     randomness = seed_state.for_trace(source.trace_id)
-    actor_assembler = randomness.actor_assembler(config)
+    actor_assembler = randomness.actor_assembler(
+        config,
+        start_frame_index=start_frame_index,
+    )
     physical = build_rollout(
         config,
         buildings=(),
@@ -544,6 +583,7 @@ def run_policy_rollout_with_state(
             "policy": canonical_policy,
             "environment_seed": seed_state.active_root_seed,
             "policy_seed": policy_seed,
+            "start_frame_index": start_frame_index,
             "max_frames": max_frames,
         },
     )
@@ -553,6 +593,7 @@ def run_policy_rollout_with_state(
             "schema": MATCHED_TAPE_SCHEMA,
             "trace_id": source.trace_id,
             "environment_seed": seed_state.active_root_seed,
+            "start_frame_index": start_frame_index,
             "max_frames": max_frames,
         },
     )
@@ -572,7 +613,13 @@ def run_policy_rollout_with_state(
     cluster_actions: dict[str, list[int]] = {}
     max_pool_utilization = 0.0
 
-    frame_iterator = iter(reader.iter_frames())
+    reader_frame_limit = None if max_frames is None else max_frames + 1
+    frame_iterator = iter(
+        reader.iter_frames(
+            start_frame_index=start_frame_index,
+            max_frames=reader_frame_limit,
+        )
+    )
     try:
         frame = next(frame_iterator)
     except StopIteration:
@@ -836,7 +883,9 @@ def run_policy_rollout_with_state(
         digest,
         {"normalization_state": final_normalization_payload},
     )
-    source_exhausted = frames == reader.decision_frame_count
+    first_frame_index = start_frame_index
+    last_frame_index = first_frame_index + frames - 1
+    source_exhausted = last_frame_index == reader.last_frame_index
     episode_clusters = tuple(
         EpisodeClusterTally(
             pair_id=pair_id,
@@ -854,8 +903,11 @@ def run_policy_rollout_with_state(
         policy=canonical_policy,
         environment_seed=seed_state.active_root_seed,
         policy_seed=policy_seed,
+        requested_start_frame_index=start_frame_index,
         requested_max_frames=max_frames,
         available_frames=reader.decision_frame_count,
+        first_frame_index=first_frame_index,
+        last_frame_index=last_frame_index,
         frames=frames,
         source_exhausted=source_exhausted,
         nonempty_frames=nonempty_frames,
@@ -898,6 +950,7 @@ def run_policy_rollout(
     policy: PopulationPolicy,
     environment_seed: int | None = None,
     policy_seed: int = 0,
+    start_frame_index: int = 0,
     max_frames: int | None = None,
 ) -> DeterministicRolloutReport:
     """Backward-compatible report-only population rollout entry point."""
@@ -908,6 +961,7 @@ def run_policy_rollout(
         policy=policy,
         environment_seed=environment_seed,
         policy_seed=policy_seed,
+        start_frame_index=start_frame_index,
         max_frames=max_frames,
     ).report
 
@@ -919,6 +973,7 @@ def run_deterministic_rollout(
     policy: str,
     environment_seed: int | None = None,
     policy_seed: int = 0,
+    start_frame_index: int = 0,
     max_frames: int | None = None,
 ) -> DeterministicRolloutReport:
     """Run a Phase 5 random, cycle, or fixed-action validation policy."""
@@ -930,6 +985,7 @@ def run_deterministic_rollout(
         policy=_DeterministicPolicy(canonical, policy_seed),
         environment_seed=environment_seed,
         policy_seed=policy_seed,
+        start_frame_index=start_frame_index,
         max_frames=max_frames,
     )
 

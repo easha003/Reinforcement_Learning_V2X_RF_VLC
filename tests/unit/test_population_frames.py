@@ -220,6 +220,49 @@ def test_frames_are_chronological_simultaneous_and_stably_ordered(trace_path: Pa
     assert "pair-zero" not in {pair for frame in frames for pair in frame.active_pair_ids}
 
 
+def test_reader_starts_inside_physical_pair_episodes_without_pre_window_state(
+    trace_path: Path,
+) -> None:
+    frames = list(
+        _reader(trace_path).iter_frames(
+            start_frame_index=1,
+            max_frames=2,
+        )
+    )
+
+    assert [frame.index for frame in frames] == [1, 2]
+    first = {pair.pair_id: pair for pair in frames[0].pairs}
+    assert first["pair-a"].episode_step == 1
+    assert not first["pair-a"].lifecycle.born
+    assert first["pair-b"].episode_step == 0
+    assert first["pair-b"].lifecycle.born
+    assert first["pair-c"].episode_step == 1
+    assert first["pair-c"].lifecycle.final
+
+
+def test_reader_bounds_windows_at_the_physical_trace_end(trace_path: Path) -> None:
+    frames = list(
+        _reader(trace_path).iter_frames(
+            start_frame_index=3,
+            max_frames=20,
+        )
+    )
+
+    assert [frame.index for frame in frames] == [3]
+    assert frames[0].active_pair_ids == ("pair-b",)
+
+
+@pytest.mark.parametrize("start", (-1, 4, True))
+def test_reader_rejects_an_invalid_window_start(trace_path: Path, start: object) -> None:
+    with pytest.raises(ValueError, match="start_frame_index"):
+        list(
+            _reader(trace_path).iter_frames(
+                start_frame_index=start,  # type: ignore[arg-type]
+                max_frames=2,
+            )
+        )
+
+
 def test_lifecycle_flags_distinguish_birth_termination_and_both_truncations(
     trace_path: Path,
 ) -> None:

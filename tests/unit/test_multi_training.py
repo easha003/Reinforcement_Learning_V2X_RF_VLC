@@ -10,11 +10,13 @@ import pytest
 import torch
 
 from hybrid_v2x_rl.agents.checkpointing import restore_training_checkpoint
+from hybrid_v2x_rl.agents.joint_training import JointDensityTrainingError
 from hybrid_v2x_rl.agents.multi_training import (
     MULTI_TRAINING_ITERATION_SCHEMA,
     curriculum_position,
     run_joint_density_training,
 )
+from hybrid_v2x_rl.agents.trace_windows import TRACE_WINDOW_SCHEDULE_SCHEMA
 from hybrid_v2x_rl.artifacts.store import ArtifactStore
 from hybrid_v2x_rl.config.hashing import config_hash
 from hybrid_v2x_rl.config.loader import load_headline_config
@@ -112,7 +114,7 @@ def test_resume_matches_uninterrupted_training_and_advances_curriculum(
     tmp_path: Path,
 ) -> None:
     base = load_headline_config(PROJECT_ROOT)
-    training = base.training.model_copy(update={"total_transitions_per_seed": 180})
+    training = base.training.model_copy(update={"total_transitions_per_seed": 150})
     config = base.model_copy(update={"training": training})
     sources = tuple(_source(tmp_path, config, density=value) for value in (10, 20, 30))
 
@@ -148,7 +150,7 @@ def test_resume_matches_uninterrupted_training_and_advances_curriculum(
 
     assert resumed.iterations_run == 1
     assert resumed.latest_checkpoint.counters.completed_iterations == 2
-    assert resumed.latest_checkpoint.counters.environment_transitions == 36
+    assert resumed.latest_checkpoint.counters.environment_transitions == 33
     assert all(_sha256(path) == digest for path, digest in immutable.items())
     assert uninterrupted.metrics_path.read_text(encoding="utf-8") == (
         resumed.metrics_path.read_text(encoding="utf-8")
@@ -169,6 +171,17 @@ def test_resume_matches_uninterrupted_training_and_advances_curriculum(
     ]
     assert reports[0]["curriculum"]["boundary_crossed"] is True
     assert reports[0]["curriculum"]["boundary_overshoot_transitions"] == 0
+    assert [report["trace_window_schedule"] for report in reports] == [
+        TRACE_WINDOW_SCHEDULE_SCHEMA,
+        TRACE_WINDOW_SCHEDULE_SCHEMA,
+    ]
+    assert [
+        [segment["trace_window"]["start_frame_index"] for segment in report["segments"]]
+        for report in reports
+    ] == [
+        [0, 0, 0, 3, 3, 3],
+        [1, 1, 1, 0, 0, 0],
+    ]
 
     uninterrupted_state = restore_training_checkpoint(
         uninterrupted.latest_checkpoint.path,
@@ -205,11 +218,47 @@ def test_budget_never_starts_an_overrunning_balanced_round(tmp_path: Path) -> No
     )
 
     assert result.stop_reason == "insufficient_budget_for_balanced_round"
-    assert result.latest_checkpoint.counters.environment_transitions == 18
+    assert result.latest_checkpoint.counters.environment_transitions == 15
     assert result.report["configured_transition_budget"] == 20
-    assert result.report["unused_transition_budget"] == 2
+    assert result.report["unused_transition_budget"] == 5
     assert result.iterations_run == 1
     assert len(result.metrics_path.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_resume_rejects_iteration_history_from_before_trace_window_contract(
+    tmp_path: Path,
+) -> None:
+    base = load_headline_config(PROJECT_ROOT)
+    training = base.training.model_copy(update={"total_transitions_per_seed": 180})
+    config = base.model_copy(update={"training": training})
+    sources = tuple(_source(tmp_path, config, density=value) for value in (10, 20, 30))
+    result = run_joint_density_training(
+        config,
+        sources,
+        output_root=tmp_path / "old-history",
+        rollout_packets=7,
+        max_frames_per_trace=3,
+        max_iterations=1,
+    )
+    report_path = result.iteration_report_paths[0]
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["schema"] = "hybrid-rf-vlc-rl.joint-density-training-iteration.v1"
+    report_path.write_text(
+        json.dumps(report, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(JointDensityTrainingError, match="predates or violates"):
+        run_joint_density_training(
+            config,
+            sources,
+            output_root=result.output_root,
+            resume_checkpoint=result.latest_checkpoint.path,
+            expected_checkpoint_sha256=result.latest_checkpoint.sha256,
+            rollout_packets=7,
+            max_frames_per_trace=3,
+            max_iterations=1,
+        )
 
 
 def test_curriculum_positions_use_cumulative_declared_fractions() -> None:

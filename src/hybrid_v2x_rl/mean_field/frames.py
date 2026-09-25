@@ -698,10 +698,16 @@ def _load_pair_schedule(
 
 def _iter_vehicle_frames(
     reader: MobilityTraceReader,
+    *,
+    start_time_s: float | None = None,
+    end_time_s: float | None = None,
 ) -> Iterator[tuple[float, tuple[VehicleTraceRecord, ...]]]:
     current_time: float | None = None
     current: list[VehicleTraceRecord] = []
-    for vehicle in reader.iter_vehicles():
+    for vehicle in reader.iter_vehicles(
+        start_time_s=start_time_s,
+        end_time_s=end_time_s,
+    ):
         if current_time is None:
             current_time = vehicle.time_s
         elif vehicle.time_s < current_time - _TIME_TOLERANCE_S:
@@ -940,21 +946,48 @@ class PopulationFrameReader:
             pairs=tuple(pairs),
         )
 
-    def iter_frames(self, *, max_frames: int | None = None) -> Iterator[PopulationFrame]:
-        """Yield every global decision frame, including empty-population frames."""
+    def iter_frames(
+        self,
+        *,
+        start_frame_index: int = 0,
+        max_frames: int | None = None,
+    ) -> Iterator[PopulationFrame]:
+        """Yield a bounded physical-frame window, including empty populations.
 
+        A nonzero start is an explicit sampled-episode reset. Pairs already
+        active at that physical instant retain their physical episode step and
+        ``born=False`` lifecycle, while downstream causal state owners reset
+        their observation histories at the first sampled frame.
+        """
+
+        if (
+            not isinstance(start_frame_index, int)
+            or isinstance(start_frame_index, bool)
+            or not 0 <= start_frame_index <= self.last_frame_index
+        ):
+            raise ValueError("start_frame_index must identify an available decision frame")
         if max_frames is not None and (
             not isinstance(max_frames, int) or isinstance(max_frames, bool) or max_frames <= 0
         ):
             raise ValueError("max_frames must be a positive integer or None")
-        active: dict[str, PairEpisodeSchedule] = {}
+        available = self.decision_frame_count - start_frame_index
+        selected_frames = available if max_frames is None else min(max_frames, available)
+        final_frame_index = start_frame_index + selected_frames - 1
+        active = {
+            episode.segment.pair_id: episode
+            for episode in self._episodes
+            if episode.first_frame < start_frame_index <= episode.last_frame
+        }
         lifecycle_tracker = PopulationLifecycleTracker()
-        next_index = 0
-        for time_s, vehicles in _iter_vehicle_frames(self.trace):
-            expected = (
-                self.trace.report.first_time_s
-                + next_index * self.generation_period_s
-            )
+        next_index = start_frame_index
+        emitted = 0
+        origin_s = self.trace.report.first_time_s
+        for time_s, vehicles in _iter_vehicle_frames(
+            self.trace,
+            start_time_s=origin_s + start_frame_index * self.generation_period_s,
+            end_time_s=origin_s + final_frame_index * self.generation_period_s,
+        ):
+            expected = origin_s + next_index * self.generation_period_s
             if time_s < expected - _TIME_TOLERANCE_S:
                 continue
             if time_s > expected + _TIME_TOLERANCE_S:
@@ -975,7 +1008,16 @@ class PopulationFrameReader:
             lifecycle_tracker.observe(frame)
             yield frame
             next_index += 1
-            if max_frames is not None and next_index >= max_frames:
+            emitted += 1
+            if emitted >= selected_frames:
+                if next_index == self.decision_frame_count and active:
+                    raise FrameReplayError(
+                        "pair episodes remain active after the final decision frame",
+                        context={
+                            "trace_id": self.source.trace_id,
+                            "pair_ids": sorted(active),
+                        },
+                    )
                 return
             if next_index > self.last_frame_index:
                 break

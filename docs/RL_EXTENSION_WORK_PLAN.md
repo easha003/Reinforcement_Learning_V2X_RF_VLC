@@ -633,9 +633,10 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      under the configured transition budget.
    - [x] Complete a two-update configured-trace checkpoint/resume pilot and
      audit counter, RNG, metric, hash, and immutable-artifact continuity.
-   - [ ] Add deterministic, checkpoint-resumable within-trace window progression;
-     the pilot proved that bounded segments currently revisit only frames 0–19
-     of each 9,000-frame training trace.
+   - [x] Add deterministic, checkpoint-resumable within-trace window progression;
+     the versioned schedule now resets causal state at sampled boundaries,
+     projects the hard budget over the selected interval, records wrap metadata,
+     and passes configured split-versus-uninterrupted coverage auditing.
 5. [ ] Apply the reliability curriculum:
 
    ```text
@@ -879,11 +880,15 @@ streams continue exactly; metrics append without rewriting prior evidence; the
 reliability curriculum advances from cumulative acted transitions; and exact
 pre-round accounting prevents the configured transition budget from being
 crossed. Split-versus-uninterrupted equivalence and budget-tail behavior are
-covered by integration tests, and the complete suite passes 1,382 tests with 2
-expected artifact-dependent skips. A two-update configured-trace resume pilot
-also passed checkpoint, counter, dual, RNG, metric-order, restoration, and
-artifact-immutability audits. It exposed a blocking coverage defect: bounded
-segments always restart from frame 0 and touch at most 20 of each trace's 9,000
-decision frames. The next task is deterministic checkpoint-resumable
-within-trace window progression; the full per-seed campaign remains on hold
-until that boundary passes a coverage audit.
+covered by integration tests. A two-update configured-trace resume pilot also
+passed checkpoint, counter, dual, RNG, metric-order, restoration, and
+artifact-immutability audits, then exposed a blocking frame-zero coverage
+defect. That defect is now closed by a versioned deterministic window schedule:
+nonzero windows reset causal histories without rewriting physical lifecycle,
+late Parquet ranges are filtered directly, budget projection is interval-aware,
+and v2 reports persist every start/end/cycle/wrap decision. A second configured
+audit sampled frames 0, 997, 4,099, and 5,096, reached 56.8% through the time
+axis in two updates, and produced byte-identical checkpoints and metrics for
+split/resumed versus uninterrupted execution. The full per-seed campaign is no
+longer blocked by within-trace progression; the next task is the full
+joint-density seed-1001 run and curriculum stability audit.
