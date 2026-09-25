@@ -729,6 +729,49 @@ def _iter_vehicle_frames(
         yield current_time, tuple(sorted(current, key=lambda item: item.vehicle_id))
 
 
+def _iter_selected_decision_vehicle_frames(
+    reader: MobilityTraceReader,
+    *,
+    start_frame_index: int,
+    end_frame_index: int,
+    period_s: float,
+) -> Iterator[tuple[int, float, tuple[VehicleTraceRecord, ...]]]:
+    """Yield every required decision instant in one inclusive bounded range."""
+
+    origin_s = reader.report.first_time_s
+    next_index = start_frame_index
+    for time_s, vehicles in _iter_vehicle_frames(
+        reader,
+        start_time_s=origin_s + start_frame_index * period_s,
+        end_time_s=origin_s + end_frame_index * period_s,
+    ):
+        expected = origin_s + next_index * period_s
+        if time_s < expected - _TIME_TOLERANCE_S:
+            continue
+        if time_s > expected + _TIME_TOLERANCE_S:
+            raise FrameReplayError(
+                "mobility trace is missing a required decision timestamp",
+                context={
+                    "trace_id": reader.trace_id,
+                    "expected_time_s": expected,
+                    "next_vehicle_time_s": time_s,
+                },
+            )
+        yield next_index, expected, vehicles
+        next_index += 1
+        if next_index > end_frame_index:
+            return
+    if next_index <= end_frame_index:
+        raise FrameReplayError(
+            "trace ended before every selected decision frame was emitted",
+            context={
+                "trace_id": reader.trace_id,
+                "next_frame_index": next_index,
+                "end_frame_index": end_frame_index,
+            },
+        )
+
+
 def _iter_decision_vehicle_ids(
     reader: MobilityTraceReader,
     *,
@@ -865,6 +908,7 @@ class PopulationFrameReader:
         episode: PairEpisodeSchedule,
         *,
         frame_index: int,
+        next_vehicle_ids: frozenset[str] | None,
     ) -> PairLifecycle:
         born = frame_index == episode.first_frame
         if frame_index != episode.last_frame:
@@ -873,10 +917,16 @@ class PopulationFrameReader:
         if reason in _NATURAL_END_REASONS:
             return PairLifecycle(born=born, terminated=True, end_reason=reason)
         if reason == "max_duration":
+            endpoints_available = next_vehicle_ids is not None and {
+                episode.segment.tx_id,
+                episode.segment.rx_id,
+            }.issubset(next_vehicle_ids)
             return PairLifecycle(
                 born=born,
                 truncated=True,
-                bootstrap_valid=frame_index < self.last_frame_index,
+                bootstrap_valid=(
+                    frame_index < self.last_frame_index and endpoints_available
+                ),
                 end_reason=reason,
             )
         return PairLifecycle(born=born, truncated=True, end_reason="trace_end")
@@ -887,6 +937,7 @@ class PopulationFrameReader:
         frame_index: int,
         time_s: float,
         vehicles: tuple[VehicleTraceRecord, ...],
+        next_vehicle_ids: frozenset[str] | None,
         active: dict[str, PairEpisodeSchedule],
     ) -> PopulationFrame:
         for episode in self._starts.get(frame_index, ()):
@@ -924,7 +975,11 @@ class PopulationFrameReader:
                         "missing": missing,
                     },
                 )
-            lifecycle = self._lifecycle(episode, frame_index=frame_index)
+            lifecycle = self._lifecycle(
+                episode,
+                frame_index=frame_index,
+                next_vehicle_ids=next_vehicle_ids,
+            )
             pairs.append(
                 PopulationPair(
                     pair_id=pair_id,
@@ -981,28 +1036,37 @@ class PopulationFrameReader:
         lifecycle_tracker = PopulationLifecycleTracker()
         next_index = start_frame_index
         emitted = 0
-        origin_s = self.trace.report.first_time_s
-        for time_s, vehicles in _iter_vehicle_frames(
-            self.trace,
-            start_time_s=origin_s + start_frame_index * self.generation_period_s,
-            end_time_s=origin_s + final_frame_index * self.generation_period_s,
-        ):
-            expected = origin_s + next_index * self.generation_period_s
-            if time_s < expected - _TIME_TOLERANCE_S:
-                continue
-            if time_s > expected + _TIME_TOLERANCE_S:
+        replay_end = min(final_frame_index + 1, self.last_frame_index)
+        decision_frames = iter(
+            _iter_selected_decision_vehicle_frames(
+                self.trace,
+                start_frame_index=start_frame_index,
+                end_frame_index=replay_end,
+                period_s=self.generation_period_s,
+            )
+        )
+        try:
+            current = next(decision_frames)
+        except StopIteration as error:  # pragma: no cover - helper rejects this first.
+            raise FrameReplayError("selected decision-frame range is empty") from error
+        following = next(decision_frames, None)
+        while emitted < selected_frames:
+            frame_index, expected, vehicles = current
+            if frame_index != next_index:
                 raise FrameReplayError(
-                    "mobility trace is missing a required decision timestamp",
-                    context={
-                        "trace_id": self.source.trace_id,
-                        "expected_time_s": expected,
-                        "next_vehicle_time_s": time_s,
-                    },
+                    "selected decision frames are not contiguous",
+                    context={"actual": frame_index, "expected": next_index},
                 )
+            next_vehicle_ids = (
+                frozenset(vehicle.vehicle_id for vehicle in following[2])
+                if following is not None
+                else None
+            )
             frame = self._build_frame(
-                frame_index=next_index,
+                frame_index=frame_index,
                 time_s=expected,
                 vehicles=vehicles,
+                next_vehicle_ids=next_vehicle_ids,
                 active=active,
             )
             lifecycle_tracker.observe(frame)
@@ -1019,22 +1083,17 @@ class PopulationFrameReader:
                         },
                     )
                 return
-            if next_index > self.last_frame_index:
-                break
-        if next_index != self.decision_frame_count:
-            raise FrameReplayError(
-                "trace ended before every decision frame was emitted",
-                context={
-                    "trace_id": self.source.trace_id,
-                    "emitted": next_index,
-                    "expected": self.decision_frame_count,
-                },
-            )
-        if active:
-            raise FrameReplayError(
-                "pair episodes remain active after the final decision frame",
-                context={"trace_id": self.source.trace_id, "pair_ids": sorted(active)},
-            )
+            if following is None:
+                raise FrameReplayError(
+                    "trace ended before every selected decision frame was emitted",
+                    context={
+                        "trace_id": self.source.trace_id,
+                        "next_frame_index": next_index,
+                        "end_frame_index": final_frame_index,
+                    },
+                )
+            current = following
+            following = next(decision_frames, None)
 
     def validate(self) -> FrameReplayReport:
         """Replay the full trace and reconcile source, lifecycle, and overlap counts."""

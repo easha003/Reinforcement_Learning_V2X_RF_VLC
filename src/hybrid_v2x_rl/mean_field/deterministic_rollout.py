@@ -823,7 +823,9 @@ def run_policy_rollout_with_state(
         fallback_transitions += population - usable
         births += len(ledger.born_pair_ids)
         natural_terminations += int(np.count_nonzero(boundary.terminated))
-        internal_truncations += len(boundary.bootstrap_pair_ids)
+        internal_truncations += sum(
+            reason == "max_duration" for reason in boundary.end_reasons
+        )
         trace_end_truncations += sum(reason == "trace_end" for reason in boundary.end_reasons)
         misses += int(np.sum(outcomes.sampled_miss_costs, dtype=np.float64))
         reward_terms.extend(outcome.reward for outcome in outcomes.pair_outcomes)

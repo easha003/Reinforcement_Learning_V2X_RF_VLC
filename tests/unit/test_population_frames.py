@@ -110,6 +110,37 @@ def trace_path(tmp_path: Path) -> Path:
     return artifact.path
 
 
+@pytest.fixture()
+def disappearing_endpoint_trace_path(tmp_path: Path) -> Path:
+    vehicles = [
+        *(
+            _vehicle(TRACE_ID, time_s, vehicle)
+            for time_s in (0.0, 0.05, 0.1, 0.15, 0.2)
+            for vehicle in (1, 2)
+        ),
+        _vehicle(TRACE_ID, 0.25, 1),
+        _vehicle(TRACE_ID, 0.3, 1),
+    ]
+    artifact = MobilityTraceWriter(
+        ArtifactStore(tmp_path / "artifacts"),
+        rows_per_part=7,
+    ).write(
+        trace_id=TRACE_ID,
+        vehicles=vehicles,
+        signals=(),
+        pairs=(
+            _pair("pair-gap", "veh-1", "veh-2", 0.0, 0.2, "max_duration"),
+        ),
+        network_definition="{}",
+        route_definition="{}",
+        resolved_config_yaml="service:\n  generation_period_s: 0.1\n",
+        config_hash=CONFIG_HASH,
+        code_version="test",
+        random_seeds={"mobility": 11},
+    )
+    return artifact.path
+
+
 def _reader(trace_path: Path) -> PopulationFrameReader:
     return PopulationFrameReader(
         FrameTraceSource.discover(trace_path, expected_split="train"),
@@ -286,6 +317,20 @@ def test_lifecycle_flags_distinguish_birth_termination_and_both_truncations(
     assert trace_end.truncated and not trace_end.terminated
     assert not trace_end.bootstrap_valid
     assert trace_end.end_reason == "trace_end"
+
+
+def test_internal_truncation_disables_bootstrap_when_a_next_endpoint_is_absent(
+    disappearing_endpoint_trace_path: Path,
+) -> None:
+    frames = list(
+        _reader(disappearing_endpoint_trace_path).iter_frames(max_frames=3)
+    )
+
+    assert [frame.index for frame in frames] == [0, 1, 2]
+    lifecycle = frames[-1].pairs[0].lifecycle
+    assert lifecycle.truncated and not lifecycle.terminated
+    assert not lifecycle.bootstrap_valid
+    assert lifecycle.end_reason == "max_duration"
 
 
 def test_cross_frame_lifecycle_tracker_accepts_legal_births_and_endings() -> None:

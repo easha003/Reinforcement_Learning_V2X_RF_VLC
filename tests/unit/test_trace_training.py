@@ -178,6 +178,52 @@ def empty_following_population_source(tmp_path: Path, config) -> FrameTraceSourc
     return FrameTraceSource.discover(artifact.path, expected_split="train")
 
 
+@pytest.fixture()
+def missing_following_endpoint_source(tmp_path: Path, config) -> FrameTraceSource:
+    vehicles = [
+        *(
+            _vehicle(time_s, vehicle_index)
+            for time_s in (0.0, 0.05, 0.1, 0.15, 0.2)
+            for vehicle_index in (1, 2)
+        ),
+        _vehicle(0.25, 1),
+        _vehicle(0.3, 1),
+        _vehicle(0.35, 1),
+        _vehicle(0.4, 1),
+        _vehicle(0.45, 1),
+        _vehicle(0.5, 1),
+    ]
+    pair = {
+        "trace_id": TRACE_ID,
+        "pair_id": "pair-old",
+        "tx_id": "veh-1",
+        "rx_id": "veh-2",
+        "start_s": 0.0,
+        "end_s": 0.2,
+        "duration_s": 0.2,
+        "initial_distance_m": 9.0,
+        "route_id": "route-0",
+        "eligibility_reason": "max_duration",
+        "has_intervening_vehicle": False,
+    }
+    artifact = MobilityTraceWriter(
+        ArtifactStore(tmp_path / "artifacts"),
+        rows_per_part=8,
+    ).write(
+        trace_id=TRACE_ID,
+        vehicles=vehicles,
+        signals=(),
+        pairs=(pair,),
+        network_definition="{}",
+        route_definition="{}",
+        resolved_config_yaml="test: missing-bootstrap-endpoint\n",
+        config_hash=config_hash(config),
+        code_version="test",
+        random_seeds={"mobility": 41},
+    )
+    return FrameTraceSource.discover(artifact.path, expected_split="train")
+
+
 def test_trace_smoke_run_publishes_metrics_and_complete_checkpoint(
     config,
     source: FrameTraceSource,
@@ -297,6 +343,29 @@ def test_internal_truncation_bootstraps_across_an_empty_ordinary_population(
         config,
         empty_following_population_source,
         output_root=tmp_path / "empty-bootstrap-population",
+        policy_seed=1001,
+        environment_seed=71,
+        max_frames=4,
+    )
+
+    environment = result.report["environment_report"]
+    assert environment["internal_truncations"] == 1
+    assert result.metrics.rollout_transitions == 3
+    assert result.metrics.learning_rows == 2
+    assert result.metrics.ppo.optimizer_rows == (
+        config.training.update_epochs * result.metrics.learning_rows
+    )
+
+
+def test_internal_truncation_uses_zero_bootstrap_when_a_next_endpoint_is_absent(
+    config,
+    missing_following_endpoint_source: FrameTraceSource,
+    tmp_path: Path,
+) -> None:
+    result = run_trace_smoke_training(
+        config,
+        missing_following_endpoint_source,
+        output_root=tmp_path / "missing-bootstrap-endpoint",
         policy_seed=1001,
         environment_seed=71,
         max_frames=4,
