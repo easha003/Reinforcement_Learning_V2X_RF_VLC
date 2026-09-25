@@ -109,7 +109,10 @@ environment transitions, 36 completed pair episodes, and 300 optimizer steps.
 Focused lint and static typing pass, and the complete repository regression
 suite passes 1,379 tests with 2 expected skips.
 
-The next task is a resumable multi-iteration driver. It must restore the
-checkpoint, continue deterministic trace scheduling and random streams, enforce
-the configured total transition budget, advance the reliability curriculum at
-declared boundaries, and append metrics without rewriting prior evidence.
+The resumable multi-iteration driver described in
+`PHASE8_RESUMABLE_TRAINING.md` now completes this next boundary. It restores the
+checkpoint, continues deterministic trace scheduling and random streams,
+enforces the configured total transition budget, advances the reliability
+curriculum at declared boundaries, and appends metrics without rewriting prior
+evidence. The next operational task is a bounded configured-trace resume pilot
+before launching the full per-seed campaign.

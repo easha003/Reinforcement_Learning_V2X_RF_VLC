@@ -629,13 +629,17 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
 4. [ ] Train jointly across densities 10, 20, and 30 vehicles per lane-kilometer.
    - [x] Build a versioned density-balanced rollout accumulator and execute one
      shared PPO/dual update across all three densities.
-   - [ ] Extend the one-iteration boundary to resumable multi-iteration training
+   - [x] Extend the one-iteration boundary to resumable multi-iteration training
      under the configured transition budget.
 5. [ ] Apply the reliability curriculum:
 
    ```text
    1e-2 → 1e-3 → 1e-4
    ```
+
+   - [x] Implement cumulative-transition stage selection and persist the active
+     miss budget and boundary accounting in every iteration report.
+   - [ ] Execute and analyze the curriculum during the full training campaign.
 
 6. [ ] Add a `1e-5` target only as a declared secondary experiment after the `1e-4` pipeline is stable and statistically supportable.
 7. [ ] Train five independent policy seeds.
@@ -860,9 +864,16 @@ before the old episode's next physical observation is materialized, the old
 history is released only afterward, normalization is read-only for that extra
 row, and reward/cost critics evaluate it with the ordinary next population's
 centralized summary. Recursive GAE still stops at the reset. The first
-joint-density vertical slice is now implemented: it
-cycles configured training replicates in deterministic density-balanced rounds,
-adaptively sizes complete bounded segments toward the packet target, performs
-one shared PPO/dual update, and publishes restorable state plus a versioned
-report. The next task is to extend that boundary to resumable multi-iteration
-training and enforce curriculum/transition-budget progression.
+joint-density vertical slice cycles configured training replicates in
+deterministic density-balanced rounds, adaptively sizes complete bounded
+segments toward the packet target, performs one shared PPO/dual update, and
+publishes restorable state plus a versioned report. That boundary is now
+resumable across immutable per-iteration checkpoints: models, optimizers,
+density duals, normalization, counters, source schedule, and named random
+streams continue exactly; metrics append without rewriting prior evidence; the
+reliability curriculum advances from cumulative acted transitions; and exact
+pre-round accounting prevents the configured transition budget from being
+crossed. Split-versus-uninterrupted equivalence and budget-tail behavior are
+covered by integration tests, and the complete suite passes 1,382 tests with 2
+expected artifact-dependent skips. The next task is a bounded configured-trace
+resume pilot before the full per-seed training campaign.

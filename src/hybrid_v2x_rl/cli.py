@@ -14,6 +14,7 @@ from hybrid_v2x_rl import __version__
 from hybrid_v2x_rl.agents.joint_training import (
     run_joint_density_training_iteration,
 )
+from hybrid_v2x_rl.agents.multi_training import run_joint_density_training
 from hybrid_v2x_rl.agents.trace_training import run_trace_smoke_training
 from hybrid_v2x_rl.agents.training_profile import run_trace_training_profile
 from hybrid_v2x_rl.config import config_hash as hash_config
@@ -466,6 +467,127 @@ def training_joint_iteration(
         )
         console.print(f"report: {result.report_path}")
         console.print(f"checkpoint: {result.checkpoint.path}")
+
+
+@training_app.command("joint-train")
+def training_joint_train(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="New run directory, or the existing run directory when resuming.",
+            file_okay=False,
+        ),
+    ] = Path("artifacts/logs/phase8-joint-seed1001"),
+    policy_seed: Annotated[
+        int,
+        typer.Option("--policy-seed", min=0, help="Declared policy seed."),
+    ] = 1001,
+    resume_checkpoint: Annotated[
+        Path | None,
+        typer.Option(
+            "--resume-checkpoint",
+            help="Latest immutable checkpoint inside OUTPUT/checkpoints.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+        ),
+    ] = None,
+    expected_checkpoint_sha256: Annotated[
+        str | None,
+        typer.Option(
+            "--expected-checkpoint-sha256",
+            help="Optional independent SHA-256 assertion for the resume checkpoint.",
+        ),
+    ] = None,
+    rollout_packets: Annotated[
+        int | None,
+        typer.Option(
+            "--rollout-packets",
+            min=1,
+            help="Development override; defaults to training.rollout_packets.",
+        ),
+    ] = None,
+    max_frames_per_trace: Annotated[
+        int | None,
+        typer.Option(
+            "--max-frames-per-trace",
+            min=2,
+            help="Fixed segment length; defaults to adaptive 3-to-20-frame rounds.",
+        ),
+    ] = None,
+    max_iterations: Annotated[
+        int | None,
+        typer.Option(
+            "--max-iterations",
+            min=1,
+            help="Optional invocation limit; omitted means train to the seed budget.",
+        ),
+    ] = None,
+    config: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--config",
+            help="Layered YAML configuration path; repeat in merge order.",
+            exists=True,
+        ),
+    ] = None,
+    project_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--project-root",
+            help="Project root containing configs/ and artifacts/traces/.",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the complete invocation report."),
+    ] = False,
+) -> None:
+    """Run or resume joint-density PPO through the configured seed budget."""
+
+    root = project_root if project_root is not None else Path.cwd()
+    layers = tuple(config) if config else headline_config_layers(root)
+    destination = output if output.is_absolute() else root / output
+    checkpoint = resume_checkpoint
+    if checkpoint is not None and not checkpoint.is_absolute():
+        checkpoint = root / checkpoint
+    try:
+        resolved = load_config(layers, project_root=root)
+        catalog = TraceCatalog.from_splits(
+            resolved.paths.trace_root,
+            resolved.environment.splits,
+        )
+        result = run_joint_density_training(
+            resolved,
+            catalog.for_split("train"),
+            output_root=destination,
+            policy_seed=policy_seed,
+            resume_checkpoint=checkpoint,
+            expected_checkpoint_sha256=expected_checkpoint_sha256,
+            rollout_packets=rollout_packets,
+            max_frames_per_trace=max_frames_per_trace,
+            max_iterations=max_iterations,
+        )
+    except HybridV2XError as error:
+        console.print(f"[red]{type(error).__name__}: {error}[/red]")
+        raise typer.Exit(code=1) from error
+
+    if json_output:
+        typer.echo(json.dumps(dict(result.report), indent=2, sort_keys=True))
+    else:
+        counters = result.latest_checkpoint.counters
+        console.print(
+            "[green]Phase 8 joint-density training invocation passed[/green]: "
+            f"{result.iterations_run} new iteration(s), "
+            f"{counters.environment_transitions}/"
+            f"{resolved.training.total_transitions_per_seed} transitions"
+        )
+        console.print(f"stop reason: {result.stop_reason}")
+        console.print(f"session report: {result.session_report_path}")
+        console.print(f"latest checkpoint: {result.latest_checkpoint.path}")
 
 
 @training_app.command("profile")
