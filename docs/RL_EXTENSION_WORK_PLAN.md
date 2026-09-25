@@ -627,6 +627,10 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
    - [x] Materialize and train through bootstrap-valid internal truncations using
      the old episode ID's next physical observation.
 4. [ ] Train jointly across densities 10, 20, and 30 vehicles per lane-kilometer.
+   - [x] Build a versioned density-balanced rollout accumulator and execute one
+     shared PPO/dual update across all three densities.
+   - [ ] Extend the one-iteration boundary to resumable multi-iteration training
+     under the configured transition budget.
 5. [ ] Apply the reliability curriculum:
 
    ```text
@@ -855,6 +859,10 @@ internal-truncation prerequisite is now closed: current feedback is applied
 before the old episode's next physical observation is materialized, the old
 history is released only afterward, normalization is read-only for that extra
 row, and reward/cost critics evaluate it with the ordinary next population's
-centralized summary. Recursive GAE still stops at the reset. Next, build the
-versioned joint-density trainer and its rollout accumulation across densities
-10, 20, and 30.
+centralized summary. Recursive GAE still stops at the reset. The first
+joint-density vertical slice is now implemented: it
+cycles configured training replicates in deterministic density-balanced rounds,
+adaptively sizes complete bounded segments toward the packet target, performs
+one shared PPO/dual update, and publishes restorable state plus a versioned
+report. The next task is to extend that boundary to resumable multi-iteration
+training and enforce curriculum/transition-budget progression.

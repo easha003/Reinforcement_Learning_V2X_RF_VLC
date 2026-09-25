@@ -153,7 +153,7 @@ class _PolicyFrameSample:
 
 
 @dataclass(frozen=True, slots=True)
-class _ObservedFrameSample:
+class ObservedFrameSample:
     policy: _PolicyFrameSample
     outcomes: FramePacketOutcomes
     boundary: FrameReturnBoundary
@@ -182,7 +182,7 @@ class _LearningRow:
 
 
 @dataclass(frozen=True, slots=True)
-class _PreparedRollout:
+class PreparedRollout:
     batch: PPOBatch
     reward_predictions: torch.Tensor
     cost_predictions: torch.Tensor
@@ -194,7 +194,7 @@ class _PreparedRollout:
     rollout_transitions: int
 
 
-class _TracePPOCollector(PopulationRolloutObserver):
+class TracePPOCollector(PopulationRolloutObserver):
     """Sample one shared policy and retain completed, pair-aligned frames."""
 
     name = TRACE_SMOKE_POLICY_NAME
@@ -206,16 +206,20 @@ class _TracePPOCollector(PopulationRolloutObserver):
         config: ProjectConfig,
         updater: PPOUpdater,
         action_generator: torch.Generator,
+        policy_name: str = TRACE_SMOKE_POLICY_NAME,
     ) -> None:
+        if not isinstance(policy_name, str) or not policy_name.strip():
+            raise TraceTrainingError("collector policy_name must be non-empty")
+        self.name = policy_name
         self._config = config
         self._updater = updater
         self._action_generator = action_generator
         self._critic_builder = CentralizedCriticBuilder.from_config(config)
         self._pending: dict[int, _PolicyFrameSample] = {}
-        self._frames: list[_ObservedFrameSample] = []
+        self._frames: list[ObservedFrameSample] = []
 
     @property
-    def frames(self) -> tuple[_ObservedFrameSample, ...]:
+    def frames(self) -> tuple[ObservedFrameSample, ...]:
         if self._pending:
             raise TraceTrainingError("policy samples and completed rollout frames do not reconcile")
         return tuple(self._frames)
@@ -328,7 +332,7 @@ class _TracePPOCollector(PopulationRolloutObserver):
                     context={"pair_id": pair_id},
                 )
         self._frames.append(
-            _ObservedFrameSample(
+            ObservedFrameSample(
                 policy=sample,
                 outcomes=outcomes,
                 boundary=boundary,
@@ -382,7 +386,7 @@ def run_trace_smoke_training(
         training=config.training,
     )
     dual_ascent = PerDensityDualAscent.from_config(config.training)
-    collector = _TracePPOCollector(
+    collector = TracePPOCollector(
         config=config,
         updater=updater,
         action_generator=action_generator,
@@ -409,7 +413,7 @@ def run_trace_smoke_training(
 
     miss_budget = config.training.curriculum[0].miss_budget
     stage_started = perf_counter()
-    prepared = _prepare_rollout(
+    prepared = prepare_rollout(
         frames=frames,
         config=config,
         updater=updater,
@@ -419,7 +423,7 @@ def run_trace_smoke_training(
     _record_stage(timing_observer, "rollout_preparation", stage_started)
 
     stage_started = perf_counter()
-    update_metrics = _optimize(
+    update_metrics = optimize_ppo(
         updater=updater,
         batch=prepared.batch,
         update_epochs=config.training.update_epochs,
@@ -572,8 +576,8 @@ def _prepare_output_root(path: str | Path) -> Path:
 
 def _final_observation_values(
     *,
-    current: _ObservedFrameSample,
-    following: _ObservedFrameSample,
+    current: ObservedFrameSample,
+    following: ObservedFrameSample,
     updater: PPOUpdater,
 ) -> PairedCriticValues | None:
     """Evaluate old-ID final rows with the next population's global context."""
@@ -635,14 +639,14 @@ def _final_observation_values(
     return PairedCriticValues(pair_ids=pair_ids, reward=reward, cost=cost)
 
 
-def _prepare_rollout(
+def prepare_rollout(
     *,
-    frames: tuple[_ObservedFrameSample, ...],
+    frames: tuple[ObservedFrameSample, ...],
     config: ProjectConfig,
     updater: PPOUpdater,
     dual_ascent: PerDensityDualAscent,
     density_veh_per_lane_km: float,
-) -> _PreparedRollout:
+) -> PreparedRollout:
     optimized = frames[:-1]
     if not optimized:
         raise TraceTrainingError("smoke rollout contains no optimization frames")
@@ -774,7 +778,7 @@ def _prepare_rollout(
     rollout_transitions = int(all_reward_tensor.numel())
     if rollout_transitions != sum(action_counts.values()):
         raise TraceTrainingError("rollout action counts do not partition transitions")
-    return _PreparedRollout(
+    return PreparedRollout(
         batch=batch,
         reward_predictions=reward_predictions,
         cost_predictions=cost_predictions,
@@ -832,7 +836,7 @@ def _advantages_by_row(
     return result
 
 
-def _optimize(
+def optimize_ppo(
     *,
     updater: PPOUpdater,
     batch: PPOBatch,
@@ -874,7 +878,7 @@ def _report_payload(
     environment_seed: int,
     max_frames: int,
     rollout_result: Mapping[str, object],
-    prepared: _PreparedRollout,
+    prepared: PreparedRollout,
     metrics: TrainingIterationMetrics,
     checkpoint: TrainingCheckpointSummary,
 ) -> dict[str, object]:
@@ -923,11 +927,16 @@ def _report_payload(
 
 
 __all__ = [
+    "ObservedFrameSample",
+    "PreparedRollout",
     "TRACE_SMOKE_POLICY_NAME",
     "TRACE_SMOKE_REPORT_SCHEMA",
     "TRACE_TRAINING_STAGE_NAMES",
     "TraceSmokeTrainingResult",
+    "TracePPOCollector",
     "TraceTrainingError",
     "TraceTrainingTimingObserver",
+    "optimize_ppo",
+    "prepare_rollout",
     "run_trace_smoke_training",
 ]

@@ -11,6 +11,9 @@ from rich.console import Console
 from rich.table import Table
 
 from hybrid_v2x_rl import __version__
+from hybrid_v2x_rl.agents.joint_training import (
+    run_joint_density_training_iteration,
+)
 from hybrid_v2x_rl.agents.trace_training import run_trace_smoke_training
 from hybrid_v2x_rl.agents.training_profile import run_trace_training_profile
 from hybrid_v2x_rl.config import config_hash as hash_config
@@ -372,6 +375,94 @@ def training_smoke(
             f"{result.metrics.rollout_transitions} rollout transitions, "
             f"{result.metrics.learning_rows} PPO rows, "
             f"dual={density.dual_after:.6g}"
+        )
+        console.print(f"report: {result.report_path}")
+        console.print(f"checkpoint: {result.checkpoint.path}")
+
+
+@training_app.command("joint-iteration")
+def training_joint_iteration(
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            help="New or empty artifact directory for the joint-density iteration.",
+            file_okay=False,
+        ),
+    ] = Path("artifacts/logs/phase8-joint-seed1001-iteration000"),
+    policy_seed: Annotated[
+        int,
+        typer.Option("--policy-seed", min=0, help="Declared policy seed."),
+    ] = 1001,
+    rollout_packets: Annotated[
+        int | None,
+        typer.Option(
+            "--rollout-packets",
+            min=1,
+            help="Development override; defaults to training.rollout_packets.",
+        ),
+    ] = None,
+    max_frames_per_trace: Annotated[
+        int | None,
+        typer.Option(
+            "--max-frames-per-trace",
+            min=2,
+            help="Fixed segment length; defaults to adaptive 3-to-20-frame rounds.",
+        ),
+    ] = None,
+    config: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--config",
+            help="Layered YAML configuration path; repeat in merge order.",
+            exists=True,
+        ),
+    ] = None,
+    project_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--project-root",
+            help="Project root containing configs/ and artifacts/traces/.",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit the complete machine-readable report."),
+    ] = False,
+) -> None:
+    """Run one shared PPO update over every configured training density."""
+
+    root = project_root if project_root is not None else Path.cwd()
+    layers = tuple(config) if config else headline_config_layers(root)
+    destination = output if output.is_absolute() else root / output
+    try:
+        resolved = load_config(layers, project_root=root)
+        catalog = TraceCatalog.from_splits(
+            resolved.paths.trace_root,
+            resolved.environment.splits,
+        )
+        result = run_joint_density_training_iteration(
+            resolved,
+            catalog.for_split("train"),
+            output_root=destination,
+            policy_seed=policy_seed,
+            rollout_packets=rollout_packets,
+            max_frames_per_trace=max_frames_per_trace,
+        )
+    except HybridV2XError as error:
+        console.print(f"[red]{type(error).__name__}: {error}[/red]")
+        raise typer.Exit(code=1) from error
+
+    if json_output:
+        typer.echo(json.dumps(dict(result.report), indent=2, sort_keys=True))
+    else:
+        console.print(
+            "[green]Phase 8 joint-density iteration passed[/green]: "
+            f"{result.metrics.rollout_transitions} rollout transitions, "
+            f"{result.metrics.learning_rows} PPO rows, "
+            f"{result.report['balanced_rounds']} balanced round(s)"
         )
         console.print(f"report: {result.report_path}")
         console.print(f"checkpoint: {result.checkpoint.path}")
