@@ -652,9 +652,14 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      five regimes occur in both train and validation at campaign level, but
      only 4 of 30 strict split/density/regime cells meet the declared row and
      cluster minima; uncertainty is present once temporal windows are used.
-   - [ ] Freeze the coverage claim as campaign-level with density-conditioned
+   - [x] Freeze the coverage claim as campaign-level with density-conditioned
      support and add regime-conditioned PPO evaluation before changing
-     constraint scaling.
+     constraint scaling. The bounded validation replay of the failed seed-1001
+     checkpoint reports causal-regime action probabilities, exact
+     policy-induced feasibility and miss risk, resource regret, and the three
+     declared load sensitivities without opening the test split.
+   - [ ] Run the bounded constraint-pressure recovery experiment and require a
+     material increase in feasible action mass before restarting seed 1001.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -926,10 +931,14 @@ split/density/regime cells meet 10,000 rows plus 200 clusters, and density 10
 has essentially no moderate-RF or heavy-contention/optical-permitted context.
 The counterfactual oracle also does not reproduce the proposed hand-written
 action table: RF-2/RF-3 are exceptional, while VLC, RF-1, RF-4, and DUP-4 carry
-nearly all selections as load changes. The next task is to freeze the claim as
-campaign-level coverage with density-conditioned support and add the same
-regime labels to bounded PPO evaluation. After that, use the constraint-pressure
-diagnostics for the bounded recovery experiment. Seeds 1002--1005 remain
+nearly all selections as load changes. The coverage claim is now frozen as
+campaign-level with density-conditioned support, and the bounded seed-1001
+validation replay reports regime-conditioned policy probabilities, exact
+policy-load feasibility, conditional risk, and resource regret. It confirms
+context sensitivity but also severe constrained failure: actual regime risks
+are approximately 0.024--0.101 under a `1e-4` budget, and feasible
+deterministic selections range from 20% to 80%. The next task is the bounded
+constraint-pressure recovery experiment. Seeds 1002--1005 remain
 blocked until a fresh frozen-code seed-1001 run passes the validation
 reliability gate. When full PPO training begins, Codex checks progress once per
 hour unless the user changes that interval.

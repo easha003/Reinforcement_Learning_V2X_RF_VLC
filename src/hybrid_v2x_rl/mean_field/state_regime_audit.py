@@ -60,7 +60,7 @@ from hybrid_v2x_rl.mean_field.policy_interface import (
 )
 from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 
-STATE_REGIME_AUDIT_SCHEMA: Final = "hybrid-rf-vlc-rl.state-regime-audit.v1"
+STATE_REGIME_AUDIT_SCHEMA: Final = "hybrid-rf-vlc-rl.state-regime-audit.v2"
 
 RegimeName = Literal[
     "easy_state",
@@ -161,6 +161,79 @@ class RegimeThresholds:
             "track_age_high": self.track_age_high,
             "optical_fov_boundary_rad": 0.0,
         }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> RegimeThresholds:
+        """Restore the exact training-fitted threshold contract from an audit."""
+
+        expected = {
+            "fit_split",
+            "fit_rows_seen",
+            "fit_rows_retained",
+            "quantile_low",
+            "quantile_high",
+            "rf_channel_busy_ratio",
+            "neighbor_count",
+            "predicted_blockage_probability",
+            "predictor_confidence_low",
+            "track_age_high",
+            "optical_fov_boundary_rad",
+        }
+        if not isinstance(payload, Mapping) or set(payload) != expected:
+            raise StateRegimeAuditError(
+                "persisted regime thresholds do not match their schema"
+            )
+        if payload["fit_split"] != "train" or payload["optical_fov_boundary_rad"] != 0.0:
+            raise StateRegimeAuditError(
+                "persisted regime thresholds violate the frozen causal contract"
+            )
+
+        def bounds(name: str) -> tuple[float, float]:
+            value = payload[name]
+            if not isinstance(value, Mapping) or set(value) != {"low", "high"}:
+                raise StateRegimeAuditError(f"persisted {name} bounds are invalid")
+            try:
+                return float(value["low"]), float(value["high"])
+            except (TypeError, ValueError) as error:
+                raise StateRegimeAuditError(
+                    f"persisted {name} bounds must be numeric"
+                ) from error
+
+        cbr_low, cbr_high = bounds("rf_channel_busy_ratio")
+        neighbor_low, neighbor_high = bounds("neighbor_count")
+        blockage_low, blockage_high = bounds("predicted_blockage_probability")
+        def integer(name: str) -> int:
+            value = payload[name]
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise StateRegimeAuditError(f"persisted {name} must be an integer")
+            return value
+
+        def numeric(name: str) -> float:
+            value = payload[name]
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                raise StateRegimeAuditError(f"persisted {name} must be numeric")
+            return float(value)
+
+        fit_rows_seen = integer("fit_rows_seen")
+        fit_rows_retained = integer("fit_rows_retained")
+        quantile_low = numeric("quantile_low")
+        quantile_high = numeric("quantile_high")
+        confidence_low = numeric("predictor_confidence_low")
+        track_age_high = numeric("track_age_high")
+        return cls(
+            cbr_low=cbr_low,
+            cbr_high=cbr_high,
+            neighbor_low=neighbor_low,
+            neighbor_high=neighbor_high,
+            blockage_low=blockage_low,
+            blockage_high=blockage_high,
+            confidence_low=confidence_low,
+            track_age_high=track_age_high,
+            fit_rows_seen=fit_rows_seen,
+            fit_rows_retained=fit_rows_retained,
+            quantile_low=quantile_low,
+            quantile_high=quantile_high,
+        )
 
 
 @dataclass(slots=True)
@@ -313,7 +386,7 @@ class CounterfactualAction:
 
 @dataclass(frozen=True, slots=True)
 class CounterfactualActionSet:
-    load_profile: LoadProfileName
+    load_profile: str
     other_pair_rf_attempts: int
     actions: tuple[CounterfactualAction, ...]
     selected_action: PolicyAction
@@ -335,6 +408,35 @@ def assess_counterfactual_actions(
         other_attempts = LOAD_PROFILES[load_profile]
     except KeyError as error:
         raise StateRegimeAuditError("unknown RF-load profile") from error
+    return assess_counterfactual_actions_at_load(
+        decision,
+        rf_decoding_failure_probability=rf_decoding_failure_probability,
+        vlc_failure_probability=vlc_failure_probability,
+        other_pair_rf_attempts=other_attempts * (decision.population_size - 1),
+        load_label=load_profile,
+    )
+
+
+def assess_counterfactual_actions_at_load(
+    decision: PopulationPolicyFrame,
+    *,
+    rf_decoding_failure_probability: float,
+    vlc_failure_probability: float,
+    other_pair_rf_attempts: int,
+    load_label: str = "policy_induced_load",
+) -> CounterfactualActionSet:
+    """Evaluate focal actions while holding the exact other-pair RF load fixed."""
+
+    _probability("rf_decoding_failure_probability", rf_decoding_failure_probability)
+    _probability("vlc_failure_probability", vlc_failure_probability)
+    if (
+        not isinstance(other_pair_rf_attempts, int)
+        or isinstance(other_pair_rf_attempts, bool)
+        or other_pair_rf_attempts < 0
+    ):
+        raise StateRegimeAuditError("other_pair_rf_attempts must be non-negative")
+    if not isinstance(load_label, str) or not load_label.strip():
+        raise StateRegimeAuditError("counterfactual load label must be non-empty")
     population = decision.population_size
     if population < 1:
         raise StateRegimeAuditError("counterfactual action audit requires a nonempty frame")
@@ -344,7 +446,7 @@ def assess_counterfactual_actions(
         spec = action_resources(action)
         risk = 1.0
         if spec.uses_rf:
-            offered = other_attempts * (population - 1) + spec.reserved_rf_attempts
+            offered = other_pair_rf_attempts + spec.reserved_rf_attempts
             per_attempt = decision.pool_model.counterfactual_attempt_failure_probability(
                 active_pairs=population,
                 offered_rf_attempts=offered,
@@ -372,8 +474,8 @@ def assess_counterfactual_actions(
         ),
     )
     return CounterfactualActionSet(
-        load_profile=load_profile,
-        other_pair_rf_attempts=other_attempts,
+        load_profile=load_label,
+        other_pair_rf_attempts=other_pair_rf_attempts,
         actions=tuple(rows),
         selected_action=selected.action,
         any_feasible=bool(feasible),
@@ -617,6 +719,17 @@ class StateRegimeAuditReport:
                 ),
                 "labels_may_overlap": True,
                 "actor_visible_features_only": True,
+            },
+            "coverage_claim": {
+                "level": "campaign",
+                "density_conditioned_support_reported": True,
+                "every_regime_at_every_density_claimed": False,
+                "all_campaign_regimes_observed": self.all_campaign_regimes_observed,
+                "all_campaign_regimes_supported": self.all_campaign_regimes_supported,
+                "interpretation": (
+                    "declared causal regimes are assessed across the campaign; "
+                    "per-density support is reported separately and is not assumed uniform"
+                ),
             },
             "counterfactual_load_profiles": {
                 name: {
@@ -989,6 +1102,7 @@ __all__ = [
     "ThresholdReservoir",
     "WindowSample",
     "assess_counterfactual_actions",
+    "assess_counterfactual_actions_at_load",
     "build_state_regime_audit",
     "classify_regimes",
 ]

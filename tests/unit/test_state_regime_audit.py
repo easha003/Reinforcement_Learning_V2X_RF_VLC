@@ -84,6 +84,14 @@ def test_threshold_reservoir_fits_only_retained_causal_rows() -> None:
     assert thresholds.blockage_low <= thresholds.blockage_high
 
 
+def test_regime_thresholds_round_trip_the_frozen_audit_shape() -> None:
+    thresholds = _thresholds()
+
+    restored = RegimeThresholds.from_dict(thresholds.as_dict())
+
+    assert restored == thresholds
+
+
 def test_quantile_ties_do_not_label_the_central_mass_uncertain() -> None:
     labels = classify_regimes(
         (0.5, 50.0, 0.5, 0.5, 0.4, 0.2),
@@ -165,3 +173,15 @@ def test_report_separates_observed_campaign_from_supported_density_cells() -> No
     assert report.all_campaign_regimes_observed
     assert not report.all_campaign_regimes_supported
     assert len(report.campaign_rows) == 10
+    claim = report.as_dict()["coverage_claim"]
+    assert claim == {
+        "level": "campaign",
+        "density_conditioned_support_reported": True,
+        "every_regime_at_every_density_claimed": False,
+        "all_campaign_regimes_observed": True,
+        "all_campaign_regimes_supported": False,
+        "interpretation": (
+            "declared causal regimes are assessed across the campaign; "
+            "per-density support is reported separately and is not assumed uniform"
+        ),
+    }

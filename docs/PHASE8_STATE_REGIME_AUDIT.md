@@ -74,7 +74,9 @@ survives low, moderate, and severe endogenous RF pressure.
 - Window locations, seeds, thresholds, per-regime trace/cluster counts, all
   action feasibility counts, and selected-action counts are persisted.
 - The report is versioned as
-  `hybrid-rf-vlc-rl.state-regime-audit.v1`.
+  `hybrid-rf-vlc-rl.state-regime-audit.v2`. Version 2 freezes the scientific
+  claim as campaign-level coverage with density-conditioned support and
+  explicitly disclaims uniform regime support at every density.
 
 ## Preliminary integration run
 
@@ -199,13 +201,14 @@ Repository verification after integration completed with:
 
 ## Next gate
 
-1. Freeze the scientific interpretation as campaign-level state coverage plus
-   density-conditioned support; do not claim every regime exists at every
+1. [x] Freeze the scientific interpretation as campaign-level state coverage
+   plus density-conditioned support; do not claim every regime exists at every
    density.
-2. Add the same regime labels to bounded PPO evaluation so learned action
+2. [x] Add the same regime labels to bounded PPO evaluation so learned action
    probabilities, feasible-action mass, miss risk, and resource regret are
-   reported per regime.
-3. Run the bounded constraint-pressure recovery experiment. Do not require PPO
+   reported per regime. The completed seed-1001 engineering-checkpoint result
+   is recorded in `PHASE8_PPO_REGIME_EVALUATION.md`.
+3. [ ] Run the bounded constraint-pressure recovery experiment. Do not require PPO
    to reproduce a hand-written action table that the counterfactual oracle
    itself does not reproduce.
 
