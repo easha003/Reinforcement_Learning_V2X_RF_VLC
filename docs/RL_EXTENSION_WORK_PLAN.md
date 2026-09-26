@@ -641,6 +641,10 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      265 iterations reached 9,998,802 of 10,000,000 transitions and exercised
      all three curriculum stages, but the reliability gate failed and blocks
      launching the remaining seeds with the unchanged hyperparameters.
+   - [x] Add versioned, read-only pre-update constraint-pressure diagnostics by
+     density, including reward, cost, dual-weighted, and combined advantages;
+     action probabilities, masks, counts, and entropy; and prove that recording
+     them leaves checkpoints, metrics, model state, and RNG state unchanged.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -903,6 +907,8 @@ checkpoints, trace windows, and numerical diagnostics pass engineering audits,
 but its final-20 conditional miss estimates remain approximately 0.065--0.072
 under a `1e-4` target while 99.58% of actions concentrate on `RF-1` or `VLC`.
 The run is therefore an engineering pilot, not a selectable paper seed. The
-next task is a bounded constraint-scaling recovery experiment; seeds 1002--1005
-remain blocked until a fresh frozen-code seed-1001 run passes the validation
-reliability gate.
+v3 iteration report now adds a versioned pre-update constraint-pressure record
+whose enabled/disabled paths produce byte-identical checkpoints and metrics.
+The next task is a bounded constraint-scaling recovery experiment using those
+diagnostics; seeds 1002--1005 remain blocked until a fresh frozen-code seed-1001
+run passes the validation reliability gate.

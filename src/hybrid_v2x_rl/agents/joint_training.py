@@ -384,6 +384,7 @@ def merge_prepared_rollouts(parts: tuple[PreparedRollout, ...]) -> PreparedRollo
         )
     return PreparedRollout(
         batch=batch,
+        learning_densities=torch.cat([part.learning_densities for part in parts]),
         reward_predictions=torch.cat(
             [part.reward_predictions for part in parts]
         ),

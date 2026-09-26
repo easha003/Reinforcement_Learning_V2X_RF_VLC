@@ -10,6 +10,9 @@ import pytest
 import torch
 
 from hybrid_v2x_rl.agents.checkpointing import restore_training_checkpoint
+from hybrid_v2x_rl.agents.constraint_diagnostics import (
+    CONSTRAINT_PRESSURE_DIAGNOSTICS_SCHEMA,
+)
 from hybrid_v2x_rl.agents.joint_training import JointDensityTrainingError
 from hybrid_v2x_rl.agents.multi_training import (
     MULTI_TRAINING_ITERATION_SCHEMA,
@@ -175,6 +178,13 @@ def test_resume_matches_uninterrupted_training_and_advances_curriculum(
         TRACE_WINDOW_SCHEDULE_SCHEMA,
         TRACE_WINDOW_SCHEDULE_SCHEMA,
     ]
+    assert [report["constraint_pressure"]["schema"] for report in reports] == [
+        CONSTRAINT_PRESSURE_DIAGNOSTICS_SCHEMA,
+        CONSTRAINT_PRESSURE_DIAGNOSTICS_SCHEMA,
+    ]
+    assert [report["constraint_pressure"]["learning_rows"] for report in reports] == [
+        report["learning_rows"] for report in reports
+    ]
     assert [
         [segment["trace_window"]["start_frame_index"] for segment in report["segments"]]
         for report in reports
@@ -195,6 +205,42 @@ def test_resume_matches_uninterrupted_training_and_advances_curriculum(
     )
     assert uninterrupted_state.counters == resumed_state.counters
     _assert_restored_learners_equal(uninterrupted_state, resumed_state)
+
+
+def test_constraint_diagnostics_do_not_change_checkpoint_or_metrics(
+    tmp_path: Path,
+) -> None:
+    base = load_headline_config(PROJECT_ROOT)
+    training = base.training.model_copy(update={"total_transitions_per_seed": 150})
+    config = base.model_copy(update={"training": training})
+    sources = tuple(_source(tmp_path, config, density=value) for value in (10, 20, 30))
+
+    enabled = run_joint_density_training(
+        config,
+        sources,
+        output_root=tmp_path / "diagnostics-enabled",
+        rollout_packets=7,
+        max_frames_per_trace=3,
+        max_iterations=1,
+    )
+    disabled = run_joint_density_training(
+        config,
+        sources,
+        output_root=tmp_path / "diagnostics-disabled",
+        rollout_packets=7,
+        max_frames_per_trace=3,
+        max_iterations=1,
+        _record_constraint_diagnostics=False,
+    )
+
+    assert enabled.latest_checkpoint.sha256 == disabled.latest_checkpoint.sha256
+    assert enabled.metrics_path.read_bytes() == disabled.metrics_path.read_bytes()
+    enabled_report = json.loads(enabled.iteration_report_paths[0].read_text())
+    disabled_report = json.loads(disabled.iteration_report_paths[0].read_text())
+    pressure = enabled_report["constraint_pressure"]
+    assert pressure["schema"] == CONSTRAINT_PRESSURE_DIAGNOSTICS_SCHEMA
+    assert pressure["learning_rows"] == enabled_report["learning_rows"]
+    assert disabled_report["constraint_pressure"] is None
 
 
 def test_budget_never_starts_an_overrunning_balanced_round(tmp_path: Path) -> None:

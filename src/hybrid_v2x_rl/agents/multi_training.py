@@ -21,6 +21,11 @@ from hybrid_v2x_rl.agents.checkpointing import (
     restore_training_checkpoint,
     save_training_checkpoint,
 )
+from hybrid_v2x_rl.agents.constraint_diagnostics import (
+    CONSTRAINT_PRESSURE_DIAGNOSTICS_SCHEMA,
+    ConstraintPressureDiagnostics,
+    build_constraint_pressure_diagnostics,
+)
 from hybrid_v2x_rl.agents.dual_ascent import PerDensityDualAscent
 from hybrid_v2x_rl.agents.joint_training import (
     JOINT_DENSITY_POLICY_NAME,
@@ -58,7 +63,7 @@ from hybrid_v2x_rl.mean_field.frames import (
 )
 from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizer
 
-MULTI_TRAINING_ITERATION_SCHEMA: Final = "hybrid-rf-vlc-rl.joint-density-training-iteration.v2"
+MULTI_TRAINING_ITERATION_SCHEMA: Final = "hybrid-rf-vlc-rl.joint-density-training-iteration.v3"
 MULTI_TRAINING_SESSION_SCHEMA: Final = "hybrid-rf-vlc-rl.joint-density-training-session.v1"
 _ACTION_STREAM_XOR: Final = 0xA17C_D315_5EED_1001
 _MINIBATCH_STREAM_XOR: Final = 0xB47C_D315_5EED_1002
@@ -137,6 +142,7 @@ class _Runtime:
 @dataclass(frozen=True, slots=True)
 class _IterationOutcome:
     metrics: TrainingIterationMetrics
+    constraint_pressure: ConstraintPressureDiagnostics | None
     prepared: PreparedRollout
     counters: TrainingCounters
     normalizer: ObservationNormalizer
@@ -204,6 +210,7 @@ def run_joint_density_training(
     rollout_packets: int | None = None,
     max_frames_per_trace: int | None = None,
     max_iterations: int | None = None,
+    _record_constraint_diagnostics: bool = True,
 ) -> MultiIterationTrainingResult:
     """Train until the configured budget, or a declared invocation limit, is reached.
 
@@ -227,6 +234,8 @@ def run_joint_density_training(
         or max_iterations <= 0
     ):
         raise JointDensityTrainingError("max_iterations must be positive or None")
+    if type(_record_constraint_diagnostics) is not bool:
+        raise JointDensityTrainingError("_record_constraint_diagnostics must be boolean")
     grouped = _sources_by_density(config, sources)
     destination = _prepare_run_root(
         output_root,
@@ -274,6 +283,7 @@ def run_joint_density_training(
             rollout_target=iteration_target,
             max_frames_per_trace=max_frames_per_trace,
             curriculum=stage,
+            record_constraint_diagnostics=_record_constraint_diagnostics,
         )
         if outcome is None:
             stop_reason = "insufficient_budget_for_balanced_round"
@@ -477,6 +487,7 @@ def _execute_iteration(
     rollout_target: int,
     max_frames_per_trace: int | None,
     curriculum: CurriculumPosition,
+    record_constraint_diagnostics: bool,
 ) -> _IterationOutcome | None:
     normalization_state = runtime.normalizer.snapshot()
     parts: list[PreparedRollout] = []
@@ -620,6 +631,15 @@ def _execute_iteration(
         balanced_rounds += 1
 
     prepared = merge_prepared_rollouts(tuple(parts))
+    constraint_pressure = (
+        build_constraint_pressure_diagnostics(
+            actor=runtime.updater.actor,
+            batch=prepared.batch,
+            learning_densities=prepared.learning_densities,
+        )
+        if record_constraint_diagnostics
+        else None
+    )
     updates = optimize_ppo(
         updater=runtime.updater,
         batch=prepared.batch,
@@ -657,6 +677,7 @@ def _execute_iteration(
     )
     return _IterationOutcome(
         metrics=metrics,
+        constraint_pressure=constraint_pressure,
         prepared=prepared,
         counters=counters,
         normalizer=ObservationNormalizer.from_state_dict(
@@ -778,6 +799,11 @@ def _iteration_payload(
         "action_counts": {
             action.label: outcome.prepared.action_counts[int(action)] for action in PolicyAction
         },
+        "constraint_pressure": (
+            outcome.constraint_pressure.as_dict()
+            if outcome.constraint_pressure is not None
+            else None
+        ),
         "segments": list(outcome.segment_reports),
         "training_iteration": outcome.metrics.as_dict(),
         "checkpoint": {
@@ -888,11 +914,14 @@ def _validate_existing_history(
                 artifact_path=report_path,
             ) from exc
         segments = report.get("segments") if isinstance(report, dict) else None
+        pressure = report.get("constraint_pressure") if isinstance(report, dict) else None
         if (
             not isinstance(report, dict)
             or report.get("schema") != MULTI_TRAINING_ITERATION_SCHEMA
             or report.get("iteration") != completion - 1
             or report.get("trace_window_schedule") != TRACE_WINDOW_SCHEDULE_SCHEMA
+            or not isinstance(pressure, dict)
+            or pressure.get("schema") != CONSTRAINT_PRESSURE_DIAGNOSTICS_SCHEMA
             or not isinstance(segments, list)
             or not segments
             or any(

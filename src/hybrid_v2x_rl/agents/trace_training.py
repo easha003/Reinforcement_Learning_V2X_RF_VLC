@@ -184,6 +184,7 @@ class _LearningRow:
 @dataclass(frozen=True, slots=True)
 class PreparedRollout:
     batch: PPOBatch
+    learning_densities: torch.Tensor
     reward_predictions: torch.Tensor
     cost_predictions: torch.Tensor
     all_rewards: torch.Tensor
@@ -799,6 +800,7 @@ def prepare_rollout(
         raise TraceTrainingError("rollout action counts do not partition transitions")
     return PreparedRollout(
         batch=batch,
+        learning_densities=learning_densities,
         reward_predictions=reward_predictions,
         cost_predictions=cost_predictions,
         all_rewards=all_reward_tensor,
