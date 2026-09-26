@@ -637,7 +637,11 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      the versioned schedule now resets causal state at sampled boundaries,
      projects the hard budget over the selected interval, records wrap metadata,
      and passes configured split-versus-uninterrupted coverage auditing.
-5. [ ] Apply the reliability curriculum:
+   - [x] Complete and audit the first configured seed-1001 joint-density run:
+     265 iterations reached 9,998,802 of 10,000,000 transitions and exercised
+     all three curriculum stages, but the reliability gate failed and blocks
+     launching the remaining seeds with the unchanged hyperparameters.
+5. [x] Apply the reliability curriculum:
 
    ```text
    1e-2 → 1e-3 → 1e-4
@@ -645,7 +649,10 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
 
    - [x] Implement cumulative-transition stage selection and persist the active
      miss budget and boundary accounting in every iteration report.
-   - [ ] Execute and analyze the curriculum during the full training campaign.
+   - [x] Execute and analyze the curriculum during the full seed-1001 campaign;
+     `PHASE8_SEED1001_CURRICULUM_AUDIT.md` records artifact integrity,
+     trace coverage, numerical stability, severe infeasibility, and the
+     constraint-scaling recovery gate.
 
 6. [ ] Add a `1e-5` target only as a declared secondary experiment after the `1e-4` pipeline is stable and statistically supportable.
 7. [ ] Train five independent policy seeds.
@@ -889,6 +896,13 @@ late Parquet ranges are filtered directly, budget projection is interval-aware,
 and v2 reports persist every start/end/cycle/wrap decision. A second configured
 audit sampled frames 0, 997, 4,099, and 5,096, reached 56.8% through the time
 axis in two updates, and produced byte-identical checkpoints and metrics for
-split/resumed versus uninterrupted execution. The full per-seed campaign is no
-longer blocked by within-trace progression; the next task is the full
-joint-density seed-1001 run and curriculum stability audit.
+split/resumed versus uninterrupted execution. The first full seed-1001 run now
+reached 9,998,802 of 10,000,000 configured transitions over 265 updates, all
+nine training traces, and all three curriculum stages. Its artifacts,
+checkpoints, trace windows, and numerical diagnostics pass engineering audits,
+but its final-20 conditional miss estimates remain approximately 0.065--0.072
+under a `1e-4` target while 99.58% of actions concentrate on `RF-1` or `VLC`.
+The run is therefore an engineering pilot, not a selectable paper seed. The
+next task is a bounded constraint-scaling recovery experiment; seeds 1002--1005
+remain blocked until a fresh frozen-code seed-1001 run passes the validation
+reliability gate.
