@@ -648,8 +648,13 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
    - [x] Implement a versioned training-fitted causal state-regime coverage and
      nine-action counterfactual-feasibility audit that freezes normalization
      before validation and cannot open the test split.
-   - [ ] Complete the evidence-scale state-regime audit and resolve the absent
-     uncertainty-context finding before changing PPO constraint scaling.
+   - [x] Complete the bounded `3 x 16` evidence-scale state-regime audit: all
+     five regimes occur in both train and validation at campaign level, but
+     only 4 of 30 strict split/density/regime cells meet the declared row and
+     cluster minima; uncertainty is present once temporal windows are used.
+   - [ ] Freeze the coverage claim as campaign-level with density-conditioned
+     support and add regime-conditioned PPO evaluation before changing
+     constraint scaling.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -914,14 +919,17 @@ under a `1e-4` target while 99.58% of actions concentrate on `RF-1` or `VLC`.
 The run is therefore an engineering pilot, not a selectable paper seed. The
 v3 iteration report now adds a versioned pre-update constraint-pressure record
 whose enabled/disabled paths produce byte-identical checkpoints and metrics.
-The state-regime audit implementation and its three-point temporal diagnostic
-now precede the bounded constraint-scaling recovery experiment. Four of five
-proposed contexts appeared somewhere in train and validation, but none of the
-30 split/density/regime cells met the declared evidence minima and the
-actor-visible predictor/track uncertainty context had zero rows. The next task
-is the evidence-scale `3 x 16` audit and a documented decision on uncertainty
-coverage. After that decision, use the constraint-pressure diagnostics for the
-bounded recovery experiment. Seeds 1002--1005 remain blocked until a fresh
-frozen-code seed-1001 run passes the validation reliability gate. When full PPO
-training begins, Codex checks progress once per hour unless the user changes
-that interval.
+The bounded `3 x 16` state-regime audit now shows all five contexts in both
+train and validation at campaign level, including uncertainty once causal
+temporal windows are used. Support is density-dependent: only 4 of 30 strict
+split/density/regime cells meet 10,000 rows plus 200 clusters, and density 10
+has essentially no moderate-RF or heavy-contention/optical-permitted context.
+The counterfactual oracle also does not reproduce the proposed hand-written
+action table: RF-2/RF-3 are exceptional, while VLC, RF-1, RF-4, and DUP-4 carry
+nearly all selections as load changes. The next task is to freeze the claim as
+campaign-level coverage with density-conditioned support and add the same
+regime labels to bounded PPO evaluation. After that, use the constraint-pressure
+diagnostics for the bounded recovery experiment. Seeds 1002--1005 remain
+blocked until a fresh frozen-code seed-1001 run passes the validation
+reliability gate. When full PPO training begins, Codex checks progress once per
+hour unless the user changes that interval.

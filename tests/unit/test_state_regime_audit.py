@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import numpy as np
 import pytest
 
@@ -11,6 +13,7 @@ from hybrid_v2x_rl.mean_field.rf_pool import RFPoolError, RFPoolModel
 from hybrid_v2x_rl.mean_field.state_regime_audit import (
     REGIME_NAMES,
     RegimeThresholds,
+    StateRegimeAuditReport,
     ThresholdReservoir,
     classify_regimes,
 )
@@ -130,3 +133,35 @@ def test_resource_map_fixture_covers_the_frozen_nine_actions() -> None:
     assert costs.shape == (9,)
     assert costs[0] == pytest.approx(1.0)
     assert costs[-1] == pytest.approx(5.0)
+
+
+def test_report_separates_observed_campaign_from_supported_density_cells() -> None:
+    rows = tuple(
+        {
+            "split": split,
+            "density_vehicles_per_lane_km": 10.0,
+            "regime": regime,
+            "rows": 1,
+            "pair_episode_clusters": 1,
+            "trace_count": 1,
+            "trace_ids": [f"synthetic-d10-{split}-000"],
+            "supported": False,
+        }
+        for split in ("train", "validation")
+        for regime in REGIME_NAMES
+    )
+    report = StateRegimeAuditReport(
+        config_hash="a" * 64,
+        environment_seed=1,
+        thresholds=_thresholds(),
+        windows=(),
+        rows=rows,
+        minimum_rows=10,
+        minimum_clusters=2,
+        generated_at_utc=datetime.now(UTC),
+    )
+
+    assert not report.all_regimes_supported
+    assert report.all_campaign_regimes_observed
+    assert not report.all_campaign_regimes_supported
+    assert len(report.campaign_rows) == 10

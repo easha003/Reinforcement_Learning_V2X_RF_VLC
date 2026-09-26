@@ -24,7 +24,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 import numpy as np
 
@@ -548,6 +548,55 @@ class StateRegimeAuditReport:
     def all_regimes_supported(self) -> bool:
         return bool(self.rows) and all(bool(row["supported"]) for row in self.rows)
 
+    @property
+    def campaign_rows(self) -> tuple[dict[str, object], ...]:
+        """Aggregate density cells without weakening the persisted cell gate."""
+
+        summary: list[dict[str, object]] = []
+        for split in ("train", "validation"):
+            for regime in REGIME_NAMES:
+                selected = tuple(
+                    row
+                    for row in self.rows
+                    if row["split"] == split and row["regime"] == regime
+                )
+                row_count = sum(cast(int, row["rows"]) for row in selected)
+                clusters = sum(
+                    cast(int, row["pair_episode_clusters"]) for row in selected
+                )
+                trace_ids: set[str] = set()
+                for row in selected:
+                    trace_ids.update(cast(list[str], row["trace_ids"]))
+                summary.append(
+                    {
+                        "split": split,
+                        "regime": regime,
+                        "rows": row_count,
+                        "pair_episode_clusters": clusters,
+                        "trace_count": len(trace_ids),
+                        "trace_ids": sorted(trace_ids),
+                        "observed": row_count > 0,
+                        "supported": (
+                            row_count >= self.minimum_rows
+                            and clusters >= self.minimum_clusters
+                            and bool(trace_ids)
+                        ),
+                    }
+                )
+        return tuple(summary)
+
+    @property
+    def all_campaign_regimes_observed(self) -> bool:
+        return bool(self.campaign_rows) and all(
+            bool(row["observed"]) for row in self.campaign_rows
+        )
+
+    @property
+    def all_campaign_regimes_supported(self) -> bool:
+        return bool(self.campaign_rows) and all(
+            bool(row["supported"]) for row in self.campaign_rows
+        )
+
     def as_dict(self) -> dict[str, object]:
         return {
             "schema": STATE_REGIME_AUDIT_SCHEMA,
@@ -584,9 +633,12 @@ class StateRegimeAuditReport:
                 "minimum_pair_episode_clusters_per_split_density_regime": (
                     self.minimum_clusters
                 ),
-                "all_regimes_supported": self.all_regimes_supported,
+                "all_split_density_regimes_supported": self.all_regimes_supported,
+                "all_campaign_regimes_observed": self.all_campaign_regimes_observed,
+                "all_campaign_regimes_supported": self.all_campaign_regimes_supported,
             },
             "sampled_windows": [window.as_dict() for window in self.windows],
+            "campaign_coverage": list(self.campaign_rows),
             "coverage": list(self.rows),
         }
 

@@ -2,14 +2,16 @@
 
 ## Decision
 
-The audit path is implemented and passes its integration smoke test, but the
-coverage gate is not yet satisfied.  The first three-point temporal diagnostic
-found four of the five proposed causal contexts somewhere in training and
-validation.  It found no exogenous uncertainty context under the frozen
-predictor-confidence and track-age definition, and several contexts were absent
-at density 10.  A full PPO recovery run must therefore remain blocked until an
-evidence-scale audit either demonstrates adequate support or motivates a
-declared scenario/observation change.
+The audit path and the bounded `3 x 16` evidence run are complete. All five
+proposed causal contexts occur in both training and validation when aggregated
+across density, so the synthetic campaign does expose every conceptual state.
+Coverage is not uniform: moderate-RF and heavy-contention/optical-permitted
+contexts are effectively absent at density 10, and only 4 of the 30 strict
+split/density/regime cells reached 10,000 rows plus 200 pair episodes. The
+campaign-level training rows meet those minima for all five regimes, while the
+bounded validation sample does not. A full PPO recovery run remains blocked
+until the intended coverage claim is frozen and the bounded
+constraint-pressure recovery experiment passes.
 
 This audit does not prescribe a supervised action label to PPO.  It asks
 whether the causal observations contain the proposed contexts and separately
@@ -97,22 +99,58 @@ The formal result was `0/30` supported split/density/regime cells because no
 cell met both declared evidence minima.  This is the intended fail-closed
 result for a sparse diagnostic.
 
-The fitted training thresholds also expose why uncertainty needs attention:
+The preliminary fitted thresholds initially suggested uncertainty needed
+attention:
 the predictor-confidence lower quartile was approximately `0.9950`, and the
 track-age upper quartile was approximately `0.05 s`.  No audited row crossed
-the strict tail boundary.  The current synthetic campaign therefore does not
-yet support a claim that PPO learned an exogenous uncertainty-to-duplication
-rule.
+the strict tail boundary in the one-frame windows. The evidence run below
+shows that this zero was a sparse-window artifact, not an absent scenario.
+
+## Evidence-scale `3 x 16` result
+
+The bounded evidence run processed three 16-frame causal windows per trace:
+beginning, middle, and end. It retained 205,225 training rows for threshold
+fitting and audited 36 windows across all training and validation traces. The
+test split remained unopened.
+
+| Regime | Training rows / clusters | Validation rows / clusters | Strict supported density cells |
+|---|---:|---:|---:|
+| Easy | 16,248 / 2,864 | 5,454 / 1,002 | 0 |
+| Moderate RF | 30,011 / 4,476 | 7,123 / 1,009 | 2 |
+| Poor VLC / usable RF | 30,394 / 7,495 | 8,110 / 1,995 | 1 |
+| Uncertain mixed | 17,580 / 5,860 | 5,871 / 1,957 | 0 |
+| Heavy RF / optical permitted | 18,090 / 4,918 | 7,174 / 2,007 | 1 |
+
+Therefore:
+
+- all five regimes are observed in training and validation at campaign level;
+- all five training aggregates exceed 10,000 rows and 200 clusters;
+- all validation aggregates exceed 200 clusters but not 10,000 rows in this
+  bounded sample;
+- the strict cell gate is `4/30`, so `all_split_density_regimes_supported` is
+  false; and
+- density 10 contains only 5 training and 0 validation moderate-RF rows, and no
+  heavy-contention/optical-permitted rows. This is consistent with the light
+  traffic context but prevents an every-regime-at-every-density claim.
 
 ## Preliminary action evidence
 
-The action audit does not support the proposed mapping as a literal oracle
-table:
+The evidence-scale action audit does not support the proposed mapping as a
+literal oracle table. Aggregated across split and density:
 
-- Under VLC offload, RF-1 and VLC dominate the cheapest feasible selections.
-- Under RF-1 and RF-4 population pressure, selections often move directly to
-  RF-4, DUP-4, or VLC.
-- RF-2 and RF-3 occur only exceptionally in this sparse sample.
+- Under VLC offload, RF-1 and VLC dominate every regime. For example, the easy
+  regime is 56% RF-1 and 44% VLC.
+- Under RF-4 population pressure, the easy regime is 45% DUP-4, 44% VLC, and
+  11% RF-4; this is not an unconditional VLC/RF-1 state.
+- Moderate RF is 89% VLC under every declared load profile, not predominantly
+  RF-2/RF-3.
+- Poor-VLC/usable-RF is still 56% VLC under truth and rises from 10% DUP-4 under
+  RF-1 pressure to 16% under RF-4 pressure.
+- Uncertain mixed state rises from 12% DUP-4 under RF-1 pressure to 17% under
+  RF-4 pressure, but remains 70% VLC.
+- Heavy RF with optical permission is 74% VLC under pressure, which supports
+  that qualitative part of the hypothesis.
+- RF-2 and RF-3 occur only exceptionally.
 - Rows labeled poor-VLC from causal forecasts sometimes have VLC as the
   truth-oracle selection.  This is direct evidence of partial observability,
   not a report inconsistency.
@@ -150,9 +188,8 @@ Bounded evidence run:
   --minimum-clusters 200
 ```
 
-The `3 x 16` run is intentionally larger than the completed three-point
-diagnostic.  Its result must be reviewed before changing scenario generation,
-regime definitions, constraint scaling, or PPO hyperparameters.
+The command above produced the evidence-scale result recorded in this
+document. Its generated JSON remains a local, ignored evaluation artifact.
 
 Repository verification after integration completed with:
 
@@ -162,13 +199,15 @@ Repository verification after integration completed with:
 
 ## Next gate
 
-1. Run and inspect the bounded `3 x 16` audit.
-2. Determine whether the zero uncertainty support persists across temporal
-   windows with causal history.
-3. If it persists, explicitly choose between adding a synthetic uncertainty
-   scenario and removing the uncertainty-to-duplication claim.
-4. Only after the coverage decision, run the bounded constraint-pressure
-   recovery experiment.
+1. Freeze the scientific interpretation as campaign-level state coverage plus
+   density-conditioned support; do not claim every regime exists at every
+   density.
+2. Add the same regime labels to bounded PPO evaluation so learned action
+   probabilities, feasible-action mass, miss risk, and resource regret are
+   reported per regime.
+3. Run the bounded constraint-pressure recovery experiment. Do not require PPO
+   to reproduce a hand-written action table that the counterfactual oracle
+   itself does not reproduce.
 
 When a full PPO training campaign eventually begins, Codex monitoring uses a
 one-hour check interval unless the user changes that instruction.  This audit

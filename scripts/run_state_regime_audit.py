@@ -60,7 +60,9 @@ def main() -> int:
     supported = sum(bool(row["supported"]) for row in report.rows)
     print(
         f"state-regime coverage: supported={supported}/{len(report.rows)} "
-        f"all_supported={report.all_regimes_supported}"
+        f"all_cells_supported={report.all_regimes_supported} "
+        f"all_campaign_observed={report.all_campaign_regimes_observed} "
+        f"all_campaign_supported={report.all_campaign_regimes_supported}"
     )
     print(f"test split opened: {report.as_dict()['test_split_opened']}")
     print(f"wrote {output}")
