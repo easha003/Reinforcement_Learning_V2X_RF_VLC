@@ -645,6 +645,11 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      density, including reward, cost, dual-weighted, and combined advantages;
      action probabilities, masks, counts, and entropy; and prove that recording
      them leaves checkpoints, metrics, model state, and RNG state unchanged.
+   - [x] Implement a versioned training-fitted causal state-regime coverage and
+     nine-action counterfactual-feasibility audit that freezes normalization
+     before validation and cannot open the test split.
+   - [ ] Complete the evidence-scale state-regime audit and resolve the absent
+     uncertainty-context finding before changing PPO constraint scaling.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -909,6 +914,14 @@ under a `1e-4` target while 99.58% of actions concentrate on `RF-1` or `VLC`.
 The run is therefore an engineering pilot, not a selectable paper seed. The
 v3 iteration report now adds a versioned pre-update constraint-pressure record
 whose enabled/disabled paths produce byte-identical checkpoints and metrics.
-The next task is a bounded constraint-scaling recovery experiment using those
-diagnostics; seeds 1002--1005 remain blocked until a fresh frozen-code seed-1001
-run passes the validation reliability gate.
+The state-regime audit implementation and its three-point temporal diagnostic
+now precede the bounded constraint-scaling recovery experiment. Four of five
+proposed contexts appeared somewhere in train and validation, but none of the
+30 split/density/regime cells met the declared evidence minima and the
+actor-visible predictor/track uncertainty context had zero rows. The next task
+is the evidence-scale `3 x 16` audit and a documented decision on uncertainty
+coverage. After that decision, use the constraint-pressure diagnostics for the
+bounded recovery experiment. Seeds 1002--1005 remain blocked until a fresh
+frozen-code seed-1001 run passes the validation reliability gate. When full PPO
+training begins, Codex checks progress once per hour unless the user changes
+that interval.

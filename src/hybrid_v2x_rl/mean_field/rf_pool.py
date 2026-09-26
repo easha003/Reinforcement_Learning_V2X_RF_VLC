@@ -589,6 +589,69 @@ class RFPoolModel:
         collision = response.per_attempt_collision_probability
         return 1.0 - (1.0 - collision) * (1.0 - half_duplex)
 
+    def counterfactual_attempt_failure_probability(
+        self,
+        *,
+        active_pairs: int,
+        offered_rf_attempts: int,
+        decoding_failure_probability: float,
+        sensed_fraction: float = 1.0,
+    ) -> float:
+        """Return one RF-attempt failure probability from aggregate load.
+
+        State-regime audits need to compare a focal pair's nine actions while
+        holding the other pairs to a declared load profile.  Building a full
+        identity ledger for every focal action would turn that diagnostic into
+        quadratic work.  This method exposes the exact aggregate calculation
+        already used by :meth:`evaluate` and :meth:`combine_attempt_risk`
+        without manufacturing pair identities or sampled outcomes.
+
+        ``offered_rf_attempts`` includes the focal action's reservations.  A
+        positive value is therefore required: a caller evaluating VLC-only
+        does not have an RF attempt and must not call this method.
+        """
+
+        if (
+            not isinstance(active_pairs, int)
+            or isinstance(active_pairs, bool)
+            or active_pairs <= 0
+        ):
+            raise RFPoolError("counterfactual load requires positive active_pairs")
+        if (
+            not isinstance(offered_rf_attempts, int)
+            or isinstance(offered_rf_attempts, bool)
+            or offered_rf_attempts <= 0
+        ):
+            raise RFPoolError(
+                "counterfactual RF risk requires positive offered_rf_attempts"
+            )
+        if (
+            not math.isfinite(decoding_failure_probability)
+            or not 0.0 <= decoding_failure_probability <= 1.0
+        ):
+            raise RFPoolError(
+                "decoding_failure_probability must lie in [0, 1]"
+            )
+        if not math.isfinite(sensed_fraction) or not 0.0 <= sensed_fraction <= 1.0:
+            raise RFPoolError("sensed_fraction must lie in [0, 1]")
+
+        parameters = self.attempt_parameters
+        contenders = max(0, offered_rf_attempts - 1)
+        collision = collision_probability(
+            contenders,
+            parameters,
+            sensed_fraction=sensed_fraction,
+        )
+        mean_attempts = offered_rf_attempts / active_pairs
+        half_duplex = half_duplex_probability(
+            replace(
+                parameters,
+                airtime_s=mean_attempts * self.attempt_airtime_s,
+            )
+        )
+        access = 1.0 - (1.0 - collision) * (1.0 - half_duplex)
+        return 1.0 - (1.0 - access) * (1.0 - decoding_failure_probability)
+
     def combine_attempt_risk(
         self,
         response: RFPoolResponse,
