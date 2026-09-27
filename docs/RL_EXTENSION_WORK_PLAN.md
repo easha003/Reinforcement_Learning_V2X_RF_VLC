@@ -674,9 +674,20 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      but all 13 observed density/regime cells remain 59--200 times above the
      `1e-4` target. Seed 1001 therefore fails the reliability gate and seeds
      1002--1005 remain blocked.
-   - [ ] Quantify the residual validation oracle-risk floor and separate
+   - [x] Quantify the residual validation oracle-risk floor and separate
      unavoidable physical/load infeasibility from policy action regret before
-     predeclaring another bounded recovery arm.
+     predeclaring another bounded recovery arm. The all-usable-row v2 replay
+     closes `selected risk = minimum action floor + action regret`: regret
+     explains 95.0%--99.5% of selected risk, while the fixed-policy-load floor
+     passes at density 10 (`6.13e-5`) but fails at densities 20 (`2.23e-4`)
+     and 30 (`4.46e-4`). The zero-other-RF-load floor is below target at every
+     density, so the unresolved barrier is population RF-load coupling rather
+     than an intrinsic focal-link/action-space floor. See
+     `PHASE8_SEED1001_RESIDUAL_FEASIBILITY.md`.
+   - [ ] Compute a population-joint validation oracle by enumerating aggregate
+     RF-attempt load and solving the exact one-action-per-pair assignment at
+     each load. Use its per-density floor to decide between a coordinated
+     learner/recovery arm and revision of the physical/action system.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -962,6 +973,10 @@ full seed-1001 run is now complete: it materially improves training and frozen
 validation behavior, avoids RF-1 collapse, and remains numerically stable, but
 all 13 observed validation density/regime cells fail the `1e-4` reliability
 gate. The residual policy concentrates on VLC and RF-2 while counterfactual
-feasibility frequently requires RF-4 or DUP-4. Seeds 1002--1005 remain blocked;
-the next task is a bounded oracle-risk-floor and policy-regret diagnosis before
-another training configuration is proposed.
+feasibility frequently requires RF-4 or DUP-4. The residual-feasibility
+diagnosis now shows that 95.0%--99.5% of selected risk is action regret, but
+the unilateral minimum-action floor under current population load still
+exceeds `1e-4` at densities 20 and 30. The optimistic VLC-offload floor passes
+at every density, whereas uniform RF-4 pressure fails severely. Seeds
+1002--1005 remain blocked; the next task is a population-joint load/allocation
+oracle before another training configuration is proposed.

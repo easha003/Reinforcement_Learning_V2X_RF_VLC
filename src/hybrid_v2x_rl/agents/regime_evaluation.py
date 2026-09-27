@@ -55,8 +55,14 @@ from hybrid_v2x_rl.mean_field.state_regime_audit import (
     classify_regimes,
 )
 
-PPO_REGIME_EVALUATION_SCHEMA: Final = "hybrid-rf-vlc-rl.ppo-regime-evaluation.v1"
+PPO_REGIME_EVALUATION_SCHEMA_V1: Final = "hybrid-rf-vlc-rl.ppo-regime-evaluation.v1"
+PPO_REGIME_EVALUATION_SCHEMA: Final = "hybrid-rf-vlc-rl.ppo-regime-evaluation.v2"
+PPO_REGIME_EVALUATION_COMPATIBLE_SCHEMAS: Final = (
+    PPO_REGIME_EVALUATION_SCHEMA_V1,
+    PPO_REGIME_EVALUATION_SCHEMA,
+)
 POLICY_INDUCED_LOAD: Final = "policy_induced_load"
+ALL_USABLE_ROWS: Final = "all_usable_rows"
 _RISK_TOLERANCE: Final = 2e-6
 
 
@@ -107,12 +113,16 @@ class _ProfileTally:
     feasible_probability_mass_sum: float = 0.0
     expected_miss_risk_sum: float = 0.0
     selected_miss_risk_sum: float = 0.0
+    minimum_action_miss_risk_sum: float = 0.0
+    expected_action_risk_regret_sum: float = 0.0
+    selected_action_risk_regret_sum: float = 0.0
     expected_resource_cost_sum: float = 0.0
     feasible_conditioned_resource_regret_sum: float = 0.0
     feasible_conditioned_resource_regret_rows: int = 0
     selected_feasible_resource_regret_sum: float = 0.0
     selected_feasible_resource_regret_rows: int = 0
     oracle_actions: Counter[str] = field(default_factory=Counter)
+    minimum_risk_actions: Counter[str] = field(default_factory=Counter)
     feasible_actions: Counter[str] = field(default_factory=Counter)
 
     def observe(
@@ -138,9 +148,18 @@ class _ProfileTally:
         selected = by_action.get(selected_action)
         if selected is None:
             raise PPORegimeEvaluationError("deterministic PPO action is hardware-masked")
+        minimum_risk = min(
+            assessment.actions,
+            key=lambda row: (
+                row.conditional_miss_probability,
+                row.activation_cost,
+                int(row.action),
+            ),
+        )
         self.rows += 1
         self.feasible_rows += int(assessment.any_feasible)
         self.oracle_actions[assessment.selected_action.label] += 1
+        self.minimum_risk_actions[minimum_risk.action.label] += 1
         feasible = tuple(row for row in assessment.actions if row.feasible)
         for row in feasible:
             self.feasible_actions[row.action.label] += 1
@@ -156,6 +175,16 @@ class _ProfileTally:
         self.feasible_probability_mass_sum += feasible_mass
         self.expected_miss_risk_sum += expected_risk
         self.selected_miss_risk_sum += selected.conditional_miss_probability
+        self.minimum_action_miss_risk_sum += minimum_risk.conditional_miss_probability
+        self.expected_action_risk_regret_sum += max(
+            0.0,
+            expected_risk - minimum_risk.conditional_miss_probability,
+        )
+        self.selected_action_risk_regret_sum += max(
+            0.0,
+            selected.conditional_miss_probability
+            - minimum_risk.conditional_miss_probability,
+        )
         self.expected_resource_cost_sum += expected_cost
         if feasible:
             minimum_cost = min(row.activation_cost for row in feasible)
@@ -173,7 +202,16 @@ class _ProfileTally:
                 )
                 self.selected_feasible_resource_regret_rows += 1
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(self, *, miss_budget: float) -> dict[str, object]:
+        mean_floor = _mean(self.minimum_action_miss_risk_sum, self.rows)
+        mean_expected = _mean(self.expected_miss_risk_sum, self.rows)
+        mean_selected = _mean(self.selected_miss_risk_sum, self.rows)
+        mean_expected_regret = _mean(self.expected_action_risk_regret_sum, self.rows)
+        mean_selected_regret = _mean(self.selected_action_risk_regret_sum, self.rows)
+
+        def budget_multiple(value: float | None) -> float | None:
+            return None if value is None else value / miss_budget
+
         return {
             "rows": self.rows,
             "any_feasible_fraction": _mean(float(self.feasible_rows), self.rows),
@@ -184,14 +222,29 @@ class _ProfileTally:
             "mean_infeasible_action_probability_mass": (
                 _mean(self.rows - self.feasible_probability_mass_sum, self.rows)
             ),
-            "mean_policy_expected_conditional_miss_risk": _mean(
-                self.expected_miss_risk_sum,
-                self.rows,
+            "mean_policy_expected_conditional_miss_risk": mean_expected,
+            "mean_deterministic_selected_conditional_miss_risk": mean_selected,
+            "mean_minimum_action_conditional_miss_risk": mean_floor,
+            "mean_policy_expected_action_risk_regret": mean_expected_regret,
+            "mean_deterministic_selected_action_risk_regret": mean_selected_regret,
+            "minimum_action_risk_budget_multiple": budget_multiple(mean_floor),
+            "policy_expected_risk_budget_multiple": budget_multiple(mean_expected),
+            "deterministic_selected_risk_budget_multiple": budget_multiple(mean_selected),
+            "minimum_action_mean_meets_budget": (
+                None if mean_floor is None else mean_floor <= miss_budget
             ),
-            "mean_deterministic_selected_conditional_miss_risk": _mean(
-                self.selected_miss_risk_sum,
-                self.rows,
-            ),
+            "risk_decomposition": {
+                "policy_expected": (
+                    "mean_policy_expected_conditional_miss_risk = "
+                    "mean_minimum_action_conditional_miss_risk + "
+                    "mean_policy_expected_action_risk_regret"
+                ),
+                "deterministic_selected": (
+                    "mean_deterministic_selected_conditional_miss_risk = "
+                    "mean_minimum_action_conditional_miss_risk + "
+                    "mean_deterministic_selected_action_risk_regret"
+                ),
+            },
             "mean_policy_expected_resource_cost": _mean(
                 self.expected_resource_cost_sum,
                 self.rows,
@@ -213,6 +266,10 @@ class _ProfileTally:
             ),
             "oracle_action_counts": {
                 action: int(self.oracle_actions[action]) for action in POLICY_ACTION_ORDER
+            },
+            "minimum_risk_action_counts": {
+                action: int(self.minimum_risk_actions[action])
+                for action in POLICY_ACTION_ORDER
             },
             "feasible_action_rows": {
                 action: int(self.feasible_actions[action]) for action in POLICY_ACTION_ORDER
@@ -274,7 +331,13 @@ class _RegimeTally:
         self.actual_resource_cost_sum += resource_cost
         self.actual_selected_feasible += int(feasible)
 
-    def as_dict(self, *, regime: RegimeName, density: float | None) -> dict[str, object]:
+    def as_dict(
+        self,
+        *,
+        regime: str,
+        density: float | None,
+        miss_budget: float,
+    ) -> dict[str, object]:
         if self.actual_rows != self.rows:
             raise PPORegimeEvaluationError(
                 "policy and completed-outcome regime rows do not reconcile"
@@ -313,7 +376,7 @@ class _RegimeTally:
                 ),
             },
             "counterfactuals": {
-                name: self.profiles[name].as_dict()
+                name: self.profiles[name].as_dict(miss_budget=miss_budget)
                 for name in (POLICY_INDUCED_LOAD, *LOAD_PROFILES)
             },
         }
@@ -338,6 +401,8 @@ class RegimeEvaluationAccumulator:
         init=False,
     )
     _campaign: dict[RegimeName, _RegimeTally] = field(default_factory=dict, init=False)
+    _all_density: dict[float, _RegimeTally] = field(default_factory=dict, init=False)
+    _all_campaign: _RegimeTally = field(default_factory=_RegimeTally, init=False)
     _usable: Counter[float] = field(default_factory=Counter, init=False)
     _unusable: Counter[float] = field(default_factory=Counter, init=False)
     _unclassified: Counter[float] = field(default_factory=Counter, init=False)
@@ -364,6 +429,17 @@ class RegimeEvaluationAccumulator:
         ):
             raise PPORegimeEvaluationError("policy probabilities must sum to one")
         self._usable[density] += 1
+        for tally in (
+            self._all_density.setdefault(density, _RegimeTally()),
+            self._all_campaign,
+        ):
+            tally.observe_policy(
+                trace_id=trace_id,
+                pair_id=pair_id,
+                probabilities=probabilities,
+                selected_action=selected_action,
+                assessments=assessments,
+            )
         if not labels:
             self._unclassified[density] += 1
             return
@@ -396,8 +472,13 @@ class RegimeEvaluationAccumulator:
             raise PPORegimeEvaluationError(
                 "actual selected risk differs from the policy-load counterfactual"
             )
+        tallies = [
+            self._all_density[pending.density],
+            self._all_campaign,
+        ]
         for label in pending.labels:
-            for tally in (self._cells[(pending.density, label)], self._campaign[label]):
+            tallies.extend((self._cells[(pending.density, label)], self._campaign[label]))
+        for tally in tallies:
                 tally.observe_actual(
                     conditional_risk=conditional_risk,
                     sampled_miss=sampled_miss,
@@ -405,13 +486,19 @@ class RegimeEvaluationAccumulator:
                     feasible=conditional_risk <= pending.miss_budget,
                 )
 
-    def density_rows(self, densities: Sequence[float]) -> tuple[dict[str, object], ...]:
+    def density_rows(
+        self,
+        densities: Sequence[float],
+        *,
+        miss_budget: float,
+    ) -> tuple[dict[str, object], ...]:
         rows: list[dict[str, object]] = []
         for density in sorted(set(densities)):
             for regime in REGIME_NAMES:
                 payload = self._cells.get((density, regime), _RegimeTally()).as_dict(
                     regime=regime,
                     density=density,
+                    miss_budget=miss_budget,
                 )
                 payload["density_usable_rows"] = self._usable[density]
                 payload["density_unusable_rows"] = self._unusable[density]
@@ -419,13 +506,36 @@ class RegimeEvaluationAccumulator:
                 rows.append(payload)
         return tuple(rows)
 
-    def campaign_rows(self) -> tuple[dict[str, object], ...]:
+    def campaign_rows(self, *, miss_budget: float) -> tuple[dict[str, object], ...]:
         return tuple(
             self._campaign.get(regime, _RegimeTally()).as_dict(
                 regime=regime,
                 density=None,
+                miss_budget=miss_budget,
             )
             for regime in REGIME_NAMES
+        )
+
+    def all_usable_density_rows(
+        self,
+        densities: Sequence[float],
+        *,
+        miss_budget: float,
+    ) -> tuple[dict[str, object], ...]:
+        return tuple(
+            self._all_density.get(density, _RegimeTally()).as_dict(
+                regime=ALL_USABLE_ROWS,
+                density=density,
+                miss_budget=miss_budget,
+            )
+            for density in sorted(set(densities))
+        )
+
+    def all_usable_campaign_row(self, *, miss_budget: float) -> dict[str, object]:
+        return self._all_campaign.as_dict(
+            regime=ALL_USABLE_ROWS,
+            density=None,
+            miss_budget=miss_budget,
         )
 
 
@@ -542,15 +652,14 @@ class _FrozenPPORegimePolicy:
                 selected_action=selected_action,
                 assessments=assessments,
             )
-            if labels:
-                pending[pair.pair_id] = _PendingRow(
-                    labels=labels,
-                    density=decision.frame.source.density,
-                    selected_action=selected_action,
-                    selected_risk=selected_row.conditional_miss_probability,
-                    selected_resource_cost=selected_row.activation_cost,
-                    miss_budget=decision.miss_budget,
-                )
+            pending[pair.pair_id] = _PendingRow(
+                labels=labels,
+                density=decision.frame.source.density,
+                selected_action=selected_action,
+                selected_risk=selected_row.conditional_miss_probability,
+                selected_resource_cost=selected_row.activation_cost,
+                miss_budget=decision.miss_budget,
+            )
         for actor_row in decision.actor_frame.rows:
             if not actor_row.usable:
                 self.accumulator.observe_unusable(decision.frame.source.density)
@@ -613,6 +722,8 @@ class PPORegimeEvaluationReport:
     audit_sha256: str
     thresholds: RegimeThresholds
     windows: tuple[EvaluationWindow, ...]
+    all_usable_density_rows: tuple[dict[str, object], ...]
+    all_usable_campaign_row: dict[str, object]
     density_rows: tuple[dict[str, object], ...]
     campaign_rows: tuple[dict[str, object], ...]
     generated_at_utc: datetime
@@ -656,6 +767,8 @@ class PPORegimeEvaluationReport:
             },
             "thresholds": self.thresholds.as_dict(),
             "sampled_windows": [window.as_dict() for window in self.windows],
+            "all_usable_campaign": self.all_usable_campaign_row,
+            "all_usable_by_density": list(self.all_usable_density_rows),
             "campaign_regimes": list(self.campaign_rows),
             "density_conditioned_regimes": list(self.density_rows),
         }
@@ -850,15 +963,30 @@ def build_ppo_regime_evaluation(
         audit_sha256=audit_sha256,
         thresholds=thresholds,
         windows=windows,
-        density_rows=accumulator.density_rows(densities),
-        campaign_rows=accumulator.campaign_rows(),
+        all_usable_density_rows=accumulator.all_usable_density_rows(
+            densities,
+            miss_budget=config.service.miss_budget,
+        ),
+        all_usable_campaign_row=accumulator.all_usable_campaign_row(
+            miss_budget=config.service.miss_budget,
+        ),
+        density_rows=accumulator.density_rows(
+            densities,
+            miss_budget=config.service.miss_budget,
+        ),
+        campaign_rows=accumulator.campaign_rows(
+            miss_budget=config.service.miss_budget,
+        ),
         generated_at_utc=datetime.now(UTC),
     )
 
 
 __all__ = [
+    "ALL_USABLE_ROWS",
     "POLICY_INDUCED_LOAD",
+    "PPO_REGIME_EVALUATION_COMPATIBLE_SCHEMAS",
     "PPO_REGIME_EVALUATION_SCHEMA",
+    "PPO_REGIME_EVALUATION_SCHEMA_V1",
     "EvaluationWindow",
     "PPORegimeEvaluationError",
     "PPORegimeEvaluationReport",

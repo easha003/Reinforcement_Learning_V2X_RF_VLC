@@ -66,7 +66,7 @@ def test_regime_accumulator_separates_feasibility_risk_and_resource_regret() -> 
         sampled_miss=0,
     )
 
-    campaign = accumulator.campaign_rows()[0]
+    campaign = accumulator.campaign_rows(miss_budget=0.01)[0]
     actual = campaign["actual_policy_load"]
     profiles = campaign["counterfactuals"]
     assert isinstance(actual, dict)
@@ -91,7 +91,54 @@ def test_regime_accumulator_separates_feasibility_risk_and_resource_regret() -> 
     assert induced["mean_policy_expected_conditional_miss_risk"] == pytest.approx(
         0.0505
     )
+    assert induced["mean_minimum_action_conditional_miss_risk"] == pytest.approx(0.001)
+    assert induced["mean_policy_expected_action_risk_regret"] == pytest.approx(0.0495)
+    assert induced["mean_deterministic_selected_action_risk_regret"] == pytest.approx(
+        0.0
+    )
+    assert induced["minimum_action_risk_budget_multiple"] == pytest.approx(0.1)
+    assert induced["minimum_action_mean_meets_budget"] is True
+    assert induced["minimum_risk_action_counts"]["VLC"] == 1
     assert induced["mean_feasible_conditioned_resource_regret"] == pytest.approx(0.0)
+
+    all_usable = accumulator.all_usable_campaign_row(miss_budget=0.01)
+    assert all_usable["rows"] == 1
+    assert all_usable["counterfactuals"][POLICY_INDUCED_LOAD] == induced
+
+
+def test_all_usable_summary_includes_rows_outside_named_regimes() -> None:
+    accumulator = RegimeEvaluationAccumulator()
+    assessments = {
+        POLICY_INDUCED_LOAD: _assessment(POLICY_INDUCED_LOAD),
+        **{name: _assessment(name) for name in LOAD_PROFILES},
+    }
+    accumulator.observe_policy(
+        trace_id="validation-trace",
+        pair_id="pair-unclassified",
+        density=30.0,
+        labels=(),
+        probabilities=(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        selected_action=PolicyAction.VLC,
+        assessments=assessments,
+    )
+    accumulator.observe_actual(
+        _PendingRow(
+            labels=(),
+            density=30.0,
+            selected_action=PolicyAction.VLC,
+            selected_risk=0.001,
+            selected_resource_cost=1.0,
+            miss_budget=0.01,
+        ),
+        conditional_risk=0.001,
+        sampled_miss=0,
+    )
+
+    campaign = accumulator.campaign_rows(miss_budget=0.01)
+    assert all(row["rows"] == 0 for row in campaign)
+    all_usable = accumulator.all_usable_density_rows((30.0,), miss_budget=0.01)[0]
+    assert all_usable["rows"] == 1
+    assert all_usable["regime"] == "all_usable_rows"
 
 
 def test_regime_accumulator_rejects_actual_risk_that_does_not_match_joint_load() -> None:

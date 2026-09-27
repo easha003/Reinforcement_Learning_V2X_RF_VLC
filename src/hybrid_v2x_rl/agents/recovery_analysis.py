@@ -15,7 +15,7 @@ from typing import Final, cast
 
 from hybrid_v2x_rl.agents.regime_evaluation import (
     POLICY_INDUCED_LOAD,
-    PPO_REGIME_EVALUATION_SCHEMA,
+    PPO_REGIME_EVALUATION_COMPATIBLE_SCHEMAS,
 )
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.mean_field.state_regime_audit import REGIME_NAMES
@@ -57,7 +57,7 @@ def _load_evaluation(path: Path) -> tuple[dict[str, object], str]:
         ) from error
     if not isinstance(payload, dict):
         raise ConstraintRecoveryAnalysisError("recovery evaluation must be a mapping")
-    if payload.get("schema") != PPO_REGIME_EVALUATION_SCHEMA:
+    if payload.get("schema") not in PPO_REGIME_EVALUATION_COMPATIBLE_SCHEMAS:
         raise ConstraintRecoveryAnalysisError("recovery evaluation schema is not frozen")
     if payload.get("test_split_opened") is not False:
         raise ConstraintRecoveryAnalysisError("recovery evaluation opened the test split")
