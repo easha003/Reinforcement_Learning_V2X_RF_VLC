@@ -98,8 +98,8 @@ sensitivity band, the expected sensed share passed into that model is
 monotonicity and limiting cases are tested before rollout integration.
 
 This document does not define endpoint serialization. Co-located attempts are
-kept separate specifically so the subsequent endpoint scheduler and
-half-duplex contract can account for them without losing service-flow identity.
+kept separate so `ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md` can serialize and
+account for them without losing service-flow identity.
 
 ## Implemented boundary and evidence
 

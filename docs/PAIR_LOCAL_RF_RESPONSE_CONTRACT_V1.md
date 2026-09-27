@@ -13,9 +13,11 @@ replaces the invalid assumption that all active Manhattan-frame flows share one
 global response, while retaining the declared analytical collision model with
 sensitivity bands.
 
-The implementation is deliberately isolated. The live rollout continues to
-use the global response until endpoint half-duplex, packet outcomes, delayed
-feedback, baselines, and the feasibility oracle can migrate atomically.
+The implementation is deliberately isolated. The companion
+`ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md` now supplies receiver-specific
+half-duplex exposure, but the live rollout continues to use the global
+response until packet outcomes, delayed feedback, baselines, and the
+feasibility oracle can migrate atomically.
 
 ## Occupancy response
 
@@ -81,9 +83,9 @@ predeclared uncertainty band rather than a fitted measurement:
 | Nominal | 0.85 |
 | Pessimistic | 0.70 |
 
-This boundary does not add half-duplex risk. Endpoint-specific physical
-transmit activity is the next task and must be composed only after it conserves
-all service-flow reservations.
+This boundary does not itself add half-duplex risk. The endpoint schedule now
+conserves every service-flow reservation and supplies a separate exposure for
+later packet-risk composition.
 
 ## Proven limits and monotonicity
 

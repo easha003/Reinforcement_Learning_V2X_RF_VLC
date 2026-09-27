@@ -733,8 +733,17 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        every integer external load from 0 through 800 in all three bands. It is
        not yet wired into rollout. See
        `PAIR_LOCAL_RF_RESPONSE_CONTRACT_V1.md`.
-     - [ ] Replace population-mean half-duplex risk with endpoint-specific
+     - [x] Replace population-mean half-duplex risk with endpoint-specific
        physical transmit activity while conserving multiple service flows.
+       Every selected attempt is assigned once to its physical transmitter in
+       canonical serialized order; shared-transmitter flows remain distinct;
+       inbound traffic does not create transmit activity; and each focal flow
+       receives the exact current duty cycle of its physical receiver. Endpoint
+       overload remains explicit. The boundary is not wired into rollout. See
+       `ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md`.
+     - [ ] Compose pair-specific RF attempt risk from local collision,
+       receiver-specific half-duplex exposure, and propagation without changing
+       the matched outcome-tape contract.
      - [ ] Migrate packet outcomes, delayed feedback, baselines, and the
        feasibility oracle atomically to the pair-local response contract.
    - [ ] Predeclare and execute a bounded system-feasibility frontier around
@@ -1050,6 +1059,10 @@ boundaries. Pair-local RF response contract v1 now maps every local domain to
 its own utilization, CBR, effective hidden load, and analytical collision
 probability, with limiting cases and adjacent-load monotonicity established in
 every sensing band. None of these isolated boundaries partially changes
-rollout physics. The immediate next task is endpoint-specific transmit
-scheduling and half-duplex exposure with conservation across shared physical
-endpoints. Atomic rollout migration and the corrected feasibility gate follow.
+rollout physics. Endpoint RF schedule contract v1 now assigns all selected
+attempts exactly once to physical transmitters, serializes shared-transmitter
+flows without merging them, and replaces population-mean half-duplex exposure
+with the focal receiver's current transmit duty cycle. The immediate next task
+is isolated pair-specific RF attempt-risk composition from local collision,
+receiver half-duplex, and propagation while retaining the matched random-tape
+contract. Atomic rollout migration and the corrected feasibility gate follow.
