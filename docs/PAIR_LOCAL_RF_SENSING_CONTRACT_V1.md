@@ -13,9 +13,10 @@ represent Manhattan spatial reuse: the same transmitter can be visible to one
 focal domain and hidden behind a building from another.
 
 This contract converts the pair-local topology into deterministic geometric
-visibility and then weights that visibility by selected RF attempts. It stops
-before collision and CBR evaluation, so the live rollout is unchanged until
-the full pair-specific physical path can migrate atomically.
+visibility and then weights that visibility by selected RF attempts. The
+companion `PAIR_LOCAL_RF_RESPONSE_CONTRACT_V1.md` now consumes this boundary,
+but the live rollout is unchanged until the full pair-specific physical path
+can migrate atomically.
 
 ## Geometry and information boundary
 
@@ -89,12 +90,12 @@ geometrically hidden external attempts.
 
 ## Collision handoff
 
-The next boundary will consume external attempts rather than treating the
+The response boundary consumes external attempts rather than treating the
 focal flow's own retries or co-located service flows as independent random
 contenders. If `r_sense` is the declared decoding reliability for the active
 sensitivity band, the expected sensed share passed into that model is
-`r_sense * s_i,t`; the complementary external share is hidden. The collision
-task must prove monotonicity and limiting cases before rollout integration.
+`r_sense * s_i,t`; the complementary external share is hidden. Its
+monotonicity and limiting cases are tested before rollout integration.
 
 This document does not define endpoint serialization. Co-located attempts are
 kept separate specifically so the subsequent endpoint scheduler and
