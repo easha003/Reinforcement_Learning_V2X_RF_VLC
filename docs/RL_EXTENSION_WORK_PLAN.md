@@ -716,8 +716,14 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        boundary is tested but intentionally not wired into rollout until the
        remaining pair-specific physics can migrate atomically. See
        `PAIR_LOCAL_RF_CONTENTION_CONTRACT_V1.md`.
-     - [ ] Add pair-local geometric sensing visibility and a pair-specific
+     - [x] Add pair-local geometric sensing visibility and a pair-specific
        sensed-fraction boundary without exposing simulator truth to the actor.
+       Building obstruction is cached per undirected physical-transmitter edge;
+       shared-transmitter flows remain distinct but locally known; and external
+       sensed fractions are weighted by exact selected RF attempts, with a
+       neutral value only when external demand is zero. The boundary is tested
+       but not wired into rollout. See
+       `PAIR_LOCAL_RF_SENSING_CONTRACT_V1.md`.
      - [ ] Produce pair-specific RF collision/CBR responses from local demand
        and prove load monotonicity and limiting cases in every declared band.
      - [ ] Replace population-mean half-duplex risk with endpoint-specific
@@ -1030,8 +1036,11 @@ flows lie outside the focal domain. The global-oracle result remains correct
 for the implemented code but is superseded as a physical feasibility gate. No
 further PPO recovery arm or capacity frontier is authorized yet. Pair-local RF
 contention contract v1 now freezes and implements the action-independent 200 m
-topology plus exactly conserved action-coupled local demand, without partially
-changing rollout physics. The immediate next task is pair-local geometric
-sensing visibility and a pair-specific sensed-fraction boundary. Pair-specific
-collision, endpoint half-duplex, atomic rollout migration, and the corrected
+topology plus exactly conserved action-coupled local demand. Pair-local sensing
+contract v1 now adds deterministic Manhattan building visibility and an exact
+attempt-weighted external sensed fraction while preserving actor information
+boundaries. Neither component partially changes rollout physics. The immediate
+next task is pair-specific RF collision and CBR responses from local demand,
+including load monotonicity and limiting-case proofs in every declared sensing
+band. Endpoint half-duplex, atomic rollout migration, and the corrected
 feasibility gate follow in that order.

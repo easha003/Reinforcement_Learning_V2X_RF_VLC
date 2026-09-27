@@ -8,8 +8,9 @@ Date frozen: 2026-09-27
 
 This contract replaces the frame-global RF demand assumption identified by
 `PHASE8_RF_CONTENTION_DOMAIN_AUDIT.md`. It freezes the action-independent
-spatial topology and action-coupled local demand before collision, sensing,
-half-duplex, feedback, or packet outcomes are migrated.
+spatial topology and action-coupled local demand before collision,
+half-duplex, feedback, or packet outcomes are migrated. Pair-local sensing is
+now frozen in the companion `PAIR_LOCAL_RF_SENSING_CONTRACT_V1.md`.
 
 The implementation is intentionally not connected to the live rollout yet. A
 partially migrated environment could calculate local feedback while retaining
@@ -120,16 +121,18 @@ invariant that a distant action change cannot alter focal demand.
 
 ## Explicitly deferred boundaries
 
-The following changes are not part of this first task and the live environment
-still uses the old global pool until all are ready:
+The live environment still uses the old global pool until all migration
+boundaries are ready. Pair-local sensing is implemented and tested but, like
+this topology boundary, is not yet connected to rollout. The remaining
+changes are:
 
-1. Per-pair sensing visibility and sensed-fraction construction.
-2. Pair-specific collision and channel-busy responses from `D_i,t`.
-3. Endpoint-specific transmit scheduling and half-duplex exposure.
-4. Pair-specific packet-risk and outcome assembly.
-5. Delayed local/aggregate congestion feedback semantics.
-6. Baseline and oracle migration to overlapping local domains.
-7. Removal or archival of the old global `D_t` physical-risk path.
+1. Pair-specific collision and channel-busy responses from `D_i,t` and the
+   pair-local sensed fraction.
+2. Endpoint-specific transmit scheduling and half-duplex exposure.
+3. Pair-specific packet-risk and outcome assembly.
+4. Delayed local/aggregate congestion feedback semantics.
+5. Baseline and oracle migration to overlapping local domains.
+6. Removal or archival of the old global `D_t` physical-risk path.
 
 The rollout migration must occur atomically after these components agree on
 identity, units, and timing.
