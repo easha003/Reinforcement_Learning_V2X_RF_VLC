@@ -666,6 +666,17 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      policy-expected risk from 0.190319 to 0.026301. This establishes learning
      response, not final `1e-4` feasibility; the next run is a fresh full
      seed-1001 campaign with that single selected change.
+   - [x] Complete the fresh full seed-1001 run with density multipliers
+     initialized at 10 and apply the frozen validation audit. The run reached
+     9,998,802 transitions in 265 updates and reduced last-20 training risk by
+     76--83% relative to the original pilot. Frozen validation risk fell by
+     about 78%, and feasible action mass increased from 0.502278 to 0.655464,
+     but all 13 observed density/regime cells remain 59--200 times above the
+     `1e-4` target. Seed 1001 therefore fails the reliability gate and seeds
+     1002--1005 remain blocked.
+   - [ ] Quantify the residual validation oracle-risk floor and separate
+     unavoidable physical/load infeasibility from policy action regret before
+     predeclaring another bounded recovery arm.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -946,9 +957,11 @@ are approximately 0.024--0.101 under a `1e-4` budget, and feasible
 deterministic selections range from 20% to 80%. The bounded constraint-pressure
 recovery experiment is now complete: dual learning-rate 5 and dual
 initialization 10 both pass the predeclared feasible-mass gate, entropy 0.05
-does not, and the selection rule chooses initialization 10. The selected
-bounded policy remains far above the `1e-4` target, so the result authorizes but
-does not prejudge a fresh full seed-1001 run using that single change. Seeds
-1002--1005 remain blocked until the fresh frozen-code seed-1001 run passes the
-validation reliability gate. When full PPO training begins, Codex checks
-progress once per hour unless the user changes that interval.
+does not, and the selection rule chooses initialization 10. The resulting fresh
+full seed-1001 run is now complete: it materially improves training and frozen
+validation behavior, avoids RF-1 collapse, and remains numerically stable, but
+all 13 observed validation density/regime cells fail the `1e-4` reliability
+gate. The residual policy concentrates on VLC and RF-2 while counterfactual
+feasibility frequently requires RF-4 or DUP-4. Seeds 1002--1005 remain blocked;
+the next task is a bounded oracle-risk-floor and policy-regret diagnosis before
+another training configuration is proposed.
