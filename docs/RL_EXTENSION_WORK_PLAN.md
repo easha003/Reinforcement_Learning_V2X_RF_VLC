@@ -707,6 +707,23 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      half-duplex accounting, and conservation across shared endpoints. Then
      rerun baselines and a feasibility oracle appropriate for overlapping
      local domains before authorizing more PPO training.
+     - [x] Freeze and implement pair-local topology and action-coupled demand
+       contract v1. The action-independent 200 m transmitter graph is stable,
+       reciprocal, inclusive at the radius, pair-aligned, and empty-safe;
+       selected RF reservations conserve exactly inside each overlapping
+       domain; distant actions cannot change focal demand; and distinct flows
+       sharing one transmitter remain distinct ledger reservations. This
+       boundary is tested but intentionally not wired into rollout until the
+       remaining pair-specific physics can migrate atomically. See
+       `PAIR_LOCAL_RF_CONTENTION_CONTRACT_V1.md`.
+     - [ ] Add pair-local geometric sensing visibility and a pair-specific
+       sensed-fraction boundary without exposing simulator truth to the actor.
+     - [ ] Produce pair-specific RF collision/CBR responses from local demand
+       and prove load monotonicity and limiting cases in every declared band.
+     - [ ] Replace population-mean half-duplex risk with endpoint-specific
+       physical transmit activity while conserving multiple service flows.
+     - [ ] Migrate packet outcomes, delayed feedback, baselines, and the
+       feasibility oracle atomically to the pair-local response contract.
    - [ ] Predeclare and execute a bounded system-feasibility frontier around
      the exact joint oracle. Vary explicit RF capacity, declared sensing band,
      named optical configuration, and fallback handling; identify the smallest
@@ -1011,7 +1028,10 @@ actor, legacy physical model, and collision evidence define a 200 m local
 domain. The median global/local active-flow ratio is 6.55 and 84.74% of pooled
 flows lie outside the focal domain. The global-oracle result remains correct
 for the implemented code but is superseded as a physical feasibility gate. No
-further PPO recovery arm or capacity frontier is authorized yet. The next task
-is to specify and implement pair-local contention with spatial reuse, pair-
-specific access risk, geometry-aware sensing, and endpoint-correct half-duplex
-accounting, then rerun the baselines and feasibility gate.
+further PPO recovery arm or capacity frontier is authorized yet. Pair-local RF
+contention contract v1 now freezes and implements the action-independent 200 m
+topology plus exactly conserved action-coupled local demand, without partially
+changing rollout physics. The immediate next task is pair-local geometric
+sensing visibility and a pair-specific sensed-fraction boundary. Pair-specific
+collision, endpoint half-duplex, atomic rollout migration, and the corrected
+feasibility gate follow in that order.

@@ -27,6 +27,7 @@ from hybrid_v2x_rl.mean_field.frames import (
     PopulationFrameReader,
     TraceCatalog,
 )
+from hybrid_v2x_rl.mean_field.local_rf_domain import FrameLocalRFTopology
 
 CONTENTION_DOMAIN_AUDIT_SCHEMA: Final = (
     "hybrid-rf-vlc-rl.rf-contention-domain-audit.v1"
@@ -102,37 +103,26 @@ def measure_frame_contention_domains(
         ],
         dtype=np.float64,
     )
-    pair_positions = np.asarray(
-        [(pair.transmitter.x_m, pair.transmitter.y_m) for pair in frame.pairs],
-        dtype=np.float64,
-    )
     vehicle_positions = np.asarray(
         [(vehicle.x_m, vehicle.y_m) for vehicle in frame.vehicles],
         dtype=np.float64,
     )
     radius_squared = radius_m * radius_m
-    pair_squared = np.sum(
-        (centres[:, np.newaxis, :] - pair_positions[np.newaxis, :, :]) ** 2,
-        axis=2,
-    )
     vehicle_squared = np.sum(
         (centres[:, np.newaxis, :] - vehicle_positions[np.newaxis, :, :]) ** 2,
         axis=2,
     )
-    pair_counts = np.count_nonzero(pair_squared <= radius_squared, axis=1)
     vehicle_counts = np.count_nonzero(vehicle_squared <= radius_squared, axis=1) - 1
     row_by_transmitter = {
         vehicle_id: row for row, vehicle_id in enumerate(unique_transmitter_ids)
     }
+    topology = FrameLocalRFTopology.from_frame(frame, radius_m=radius_m)
     return FrameContentionDomains(
         trace_id=frame.trace_id,
         frame_index=frame.index,
         active_pairs=len(frame.pairs),
         vehicles=len(frame.vehicles),
-        local_pair_flows=tuple(
-            int(pair_counts[row_by_transmitter[vehicle_id]])
-            for vehicle_id in pair_transmitter_ids
-        ),
+        local_pair_flows=tuple(domain.member_flows for domain in topology.domains),
         local_vehicle_neighbours=tuple(
             int(vehicle_counts[row_by_transmitter[vehicle_id]])
             for vehicle_id in pair_transmitter_ids
