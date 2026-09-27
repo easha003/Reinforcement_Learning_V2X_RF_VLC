@@ -797,7 +797,7 @@ class PPORegimeEvaluationReport:
         return target
 
 
-def _load_audit(
+def load_frozen_regime_audit(
     path: Path,
     *,
     expected_policy_environment_scope_hash: str,
@@ -891,7 +891,7 @@ def build_ppo_regime_evaluation(
     audit = Path(state_regime_audit_path).expanduser().resolve(strict=True)
     digest = config_hash(config)
     policy_environment_digest = scope_hash(config, "policy_environment")
-    thresholds, windows, environment_seed, audit_sha256 = _load_audit(
+    thresholds, windows, environment_seed, audit_sha256 = load_frozen_regime_audit(
         audit,
         expected_policy_environment_scope_hash=policy_environment_digest,
     )
@@ -992,4 +992,5 @@ __all__ = [
     "PPORegimeEvaluationReport",
     "RegimeEvaluationAccumulator",
     "build_ppo_regime_evaluation",
+    "load_frozen_regime_audit",
 ]

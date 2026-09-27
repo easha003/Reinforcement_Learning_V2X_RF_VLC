@@ -684,10 +684,19 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      density, so the unresolved barrier is population RF-load coupling rather
      than an intrinsic focal-link/action-space floor. See
      `PHASE8_SEED1001_RESIDUAL_FEASIBILITY.md`.
-   - [ ] Compute a population-joint validation oracle by enumerating aggregate
+   - [x] Compute a population-joint validation oracle by enumerating aggregate
      RF-attempt load and solving the exact one-action-per-pair assignment at
      each load. Use its per-density floor to decide between a coordinated
-     learner/recovery arm and revision of the physical/action system.
+     learner/recovery arm and revision of the physical/action system. The
+     exact frozen-validation floors are `5.40e-4`, `1.48e-3`, and `1.85e-3`
+     at densities 10, 20, and 30, so every density fails the target even with
+     omniscient joint control. See
+     `PHASE8_SEED1001_POPULATION_JOINT_ORACLE.md`.
+   - [ ] Predeclare and execute a bounded system-feasibility frontier around
+     the exact joint oracle. Vary explicit RF capacity, declared sensing band,
+     named optical configuration, and fallback handling; identify the smallest
+     scientifically defensible system change that passes `1e-4` at every
+     density before authorizing another learner or policy seed.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -978,5 +987,11 @@ diagnosis now shows that 95.0%--99.5% of selected risk is action regret, but
 the unilateral minimum-action floor under current population load still
 exceeds `1e-4` at densities 20 and 30. The optimistic VLC-offload floor passes
 at every density, whereas uniform RF-4 pressure fails severely. Seeds
-1002--1005 remain blocked; the next task is a population-joint load/allocation
-oracle before another training configuration is proposed.
+1002--1005 remain blocked. The exact population-joint oracle has now closed
+that question: even omniscient per-frame joint control has validation floors
+of `5.40e-4`, `1.48e-3`, and `1.85e-3` at densities 10, 20, and 30. Usable-row
+floors alone fail all three densities, while forced fallbacks add 26.4% of
+campaign risk. No further PPO recovery arm is authorized under the current
+system boundary. The next task is a predeclared system-feasibility frontier
+over explicit RF capacity, sensing, named optical configurations, and fallback
+handling, retaining the exact joint oracle as the gate.
