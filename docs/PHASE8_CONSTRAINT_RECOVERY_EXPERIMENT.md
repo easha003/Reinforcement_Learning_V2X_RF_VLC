@@ -107,4 +107,8 @@ and windows only when this scope agrees exactly.
 
 ## Status
 
-Protocol and gate predeclared; execution pending.
+Completed on 2026-09-27 under frozen commit `4c8ba75`. Both dual-pressure arms
+passed, the entropy-only arm failed, and the predeclared selection rule chose
+`dual_init_10`. See `PHASE8_CONSTRAINT_RECOVERY_RESULTS.md` for the immutable
+artifact identities, gate calculation, mechanism diagnostics, limitations, and
+the next-run decision.

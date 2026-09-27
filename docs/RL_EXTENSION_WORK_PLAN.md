@@ -658,8 +658,14 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      checkpoint reports causal-regime action probabilities, exact
      policy-induced feasibility and miss risk, resource regret, and the three
      declared load sensitivities without opening the test split.
-   - [ ] Run the bounded constraint-pressure recovery experiment and require a
+   - [x] Run the bounded constraint-pressure recovery experiment and require a
      material increase in feasible action mass before restarting seed 1001.
+     Both dual-pressure arms passed the frozen validation gate; entropy alone
+     failed. The predeclared rule selected dual initialization at 10, increasing
+     row-weighted feasible action mass from 0.383729 to 0.590858 and reducing
+     policy-expected risk from 0.190319 to 0.026301. This establishes learning
+     response, not final `1e-4` feasibility; the next run is a fresh full
+     seed-1001 campaign with that single selected change.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -937,8 +943,12 @@ validation replay reports regime-conditioned policy probabilities, exact
 policy-load feasibility, conditional risk, and resource regret. It confirms
 context sensitivity but also severe constrained failure: actual regime risks
 are approximately 0.024--0.101 under a `1e-4` budget, and feasible
-deterministic selections range from 20% to 80%. The next task is the bounded
-constraint-pressure recovery experiment. Seeds 1002--1005 remain
-blocked until a fresh frozen-code seed-1001 run passes the validation
-reliability gate. When full PPO training begins, Codex checks progress once per
-hour unless the user changes that interval.
+deterministic selections range from 20% to 80%. The bounded constraint-pressure
+recovery experiment is now complete: dual learning-rate 5 and dual
+initialization 10 both pass the predeclared feasible-mass gate, entropy 0.05
+does not, and the selection rule chooses initialization 10. The selected
+bounded policy remains far above the `1e-4` target, so the result authorizes but
+does not prejudge a fresh full seed-1001 run using that single change. Seeds
+1002--1005 remain blocked until the fresh frozen-code seed-1001 run passes the
+validation reliability gate. When full PPO training begins, Codex checks
+progress once per hour unless the user changes that interval.
