@@ -692,11 +692,27 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      at densities 10, 20, and 30, so every density fails the target even with
      omniscient joint control. See
      `PHASE8_SEED1001_POPULATION_JOINT_ORACLE.md`.
+   - [x] Audit whether the mean-field RF pool matches the declared physical
+     contention domain before interpreting the joint-oracle failure as system
+     infeasibility. The current implementation pools all frame-wide attempts,
+     while the actor, legacy physical model, and collision evidence use a
+     transmitter-centred 200 m domain. Across 69,626 frozen validation rows,
+     the median global/local active-flow ratio is 6.55 and 84.74% of globally
+     pooled flows lie outside the focal domain; zero rows have a truly global
+     200 m domain. The global-oracle result is therefore retained as a code-
+     model result but superseded as a physical feasibility gate. See
+     `PHASE8_RF_CONTENTION_DOMAIN_AUDIT.md`.
+   - [ ] Specify and implement pair-local RF contention with spatial reuse,
+     pair-specific pool responses, geometry-aware sensing, endpoint-correct
+     half-duplex accounting, and conservation across shared endpoints. Then
+     rerun baselines and a feasibility oracle appropriate for overlapping
+     local domains before authorizing more PPO training.
    - [ ] Predeclare and execute a bounded system-feasibility frontier around
      the exact joint oracle. Vary explicit RF capacity, declared sensing band,
      named optical configuration, and fallback handling; identify the smallest
      scientifically defensible system change that passes `1e-4` at every
-     density before authorizing another learner or policy seed.
+     density before authorizing another learner or policy seed. This task is
+     blocked until the local-contention repair establishes a valid oracle.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -987,11 +1003,15 @@ diagnosis now shows that 95.0%--99.5% of selected risk is action regret, but
 the unilateral minimum-action floor under current population load still
 exceeds `1e-4` at densities 20 and 30. The optimistic VLC-offload floor passes
 at every density, whereas uniform RF-4 pressure fails severely. Seeds
-1002--1005 remain blocked. The exact population-joint oracle has now closed
-that question: even omniscient per-frame joint control has validation floors
-of `5.40e-4`, `1.48e-3`, and `1.85e-3` at densities 10, 20, and 30. Usable-row
-floors alone fail all three densities, while forced fallbacks add 26.4% of
-campaign risk. No further PPO recovery arm is authorized under the current
-system boundary. The next task is a predeclared system-feasibility frontier
-over explicit RF capacity, sensing, named optical configurations, and fallback
-handling, retaining the exact joint oracle as the gate.
+1002--1005 remain blocked. The exact population-joint oracle found global-pool
+validation floors of `5.40e-4`, `1.48e-3`, and `1.85e-3` at densities 10, 20,
+and 30. The subsequent RF contention-domain audit now limits that conclusion:
+the mean-field environment pools the complete Manhattan frame even though the
+actor, legacy physical model, and collision evidence define a 200 m local
+domain. The median global/local active-flow ratio is 6.55 and 84.74% of pooled
+flows lie outside the focal domain. The global-oracle result remains correct
+for the implemented code but is superseded as a physical feasibility gate. No
+further PPO recovery arm or capacity frontier is authorized yet. The next task
+is to specify and implement pair-local contention with spatial reuse, pair-
+specific access risk, geometry-aware sensing, and endpoint-correct half-duplex
+accounting, then rerun the baselines and feasibility gate.

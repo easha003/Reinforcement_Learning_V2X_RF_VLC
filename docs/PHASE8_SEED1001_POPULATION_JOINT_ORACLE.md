@@ -2,6 +2,13 @@
 
 Date completed: 2026-09-27
 
+> **Interpretation update:** `PHASE8_RF_CONTENTION_DOMAIN_AUDIT.md` subsequently
+> established that the evaluated mean-field RF pool aggregates the complete
+> Manhattan frame while the project contract defines a 200 m local contention
+> domain. The oracle below remains exact for that implemented global-pool
+> model, but its physical-system infeasibility conclusion is superseded until
+> pair-local contention and spatial reuse are implemented and reevaluated.
+
 ## Decision
 
 The exact population-joint validation oracle fails the `1e-4` conditional
@@ -12,10 +19,9 @@ pair's action, no PPO policy operating under the current action, RF-pool, VLC,
 and fallback boundary can achieve the declared target on these windows.
 
 Further PPO recovery training and seeds 1002--1005 remain blocked. The next
-task is a predeclared system-feasibility frontier: vary explicit RF capacity,
-sensing, optical, and fallback assumptions one at a time, then in bounded
-combinations, to find the smallest modeled system change that makes the exact
-joint floor pass at all three densities.
+task is now the pair-local RF contention repair identified by the contention-
+domain audit. A system-feasibility frontier follows only if the corrected
+local-domain oracle still fails.
 
 ## Exactness boundary
 
