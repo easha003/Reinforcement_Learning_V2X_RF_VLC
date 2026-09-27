@@ -108,6 +108,8 @@ mean, exact and overloaded endpoint-capacity limits, all nine action counts,
 VLC release, empty-frame behavior, ordering invariance, frame binding, timing
 validation, and fail-closed derived-field reconciliation.
 
-This simulator-truth activity is not added to the actor observation. The next
-task composes pair-local collision, endpoint half-duplex, and RF propagation
-into pair-specific attempt risk before the atomic rollout migration.
+This simulator-truth activity is not added to the actor observation. The
+companion `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md` now composes pair-local
+collision, endpoint half-duplex, and RF propagation into pair-specific attempt
+risk without changing the matched-tape boundary. Both remain isolated until
+the atomic rollout migration.

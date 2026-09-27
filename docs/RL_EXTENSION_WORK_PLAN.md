@@ -741,9 +741,16 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        receives the exact current duty cycle of its physical receiver. Endpoint
        overload remains explicit. The boundary is not wired into rollout. See
        `ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md`.
-     - [ ] Compose pair-specific RF attempt risk from local collision,
+     - [x] Compose pair-specific RF attempt risk from local collision,
        receiver-specific half-duplex exposure, and propagation without changing
-       the matched outcome-tape contract.
+       the matched outcome-tape contract. The versioned frame boundary covers
+       exactly the RF-using pair subset, checks frame/timing/reservation
+       agreement, preserves every mechanism as a diagnostic, and validates the
+       analytical access and total-failure equations. It neither samples an
+       outcome nor accepts or advances a random tape, so the identity-addressed
+       v1 tape and its four RF draws remain unchanged. The boundary is tested
+       but not wired into rollout. See
+       `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md`.
      - [ ] Migrate packet outcomes, delayed feedback, baselines, and the
        feasibility oracle atomically to the pair-local response contract.
    - [ ] Predeclare and execute a bounded system-feasibility frontier around
@@ -1062,7 +1069,10 @@ every sensing band. None of these isolated boundaries partially changes
 rollout physics. Endpoint RF schedule contract v1 now assigns all selected
 attempts exactly once to physical transmitters, serializes shared-transmitter
 flows without merging them, and replaces population-mean half-duplex exposure
-with the focal receiver's current transmit duty cycle. The immediate next task
-is isolated pair-specific RF attempt-risk composition from local collision,
-receiver half-duplex, and propagation while retaining the matched random-tape
-contract. Atomic rollout migration and the corrected feasibility gate follow.
+with the focal receiver's current transmit duty cycle. Pair-local RF
+attempt-risk contract v1 now combines each focal collision response, exact
+receiver duty cycle, and propagation row into independently auditable access
+and total per-attempt probabilities. It does not consume randomness or alter
+the matched-tape schema. The immediate next task is the atomic migration of
+packet outcomes, delayed feedback, baselines, and the feasibility oracle to
+the completed pair-local boundaries. The corrected feasibility gate follows.

@@ -14,8 +14,9 @@ global response, while retaining the declared analytical collision model with
 sensitivity bands.
 
 The implementation is deliberately isolated. The companion
-`ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md` now supplies receiver-specific
-half-duplex exposure, but the live rollout continues to use the global
+`ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md` supplies receiver-specific half-duplex
+exposure, and `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md` now composes both inputs with
+RF propagation without sampling. The live rollout continues to use the global
 response until packet outcomes, delayed feedback, baselines, and the
 feasibility oracle can migrate atomically.
 
@@ -83,9 +84,10 @@ predeclared uncertainty band rather than a fitted measurement:
 | Nominal | 0.85 |
 | Pessimistic | 0.70 |
 
-This boundary does not itself add half-duplex risk. The endpoint schedule now
-conserves every service-flow reservation and supplies a separate exposure for
-later packet-risk composition.
+This boundary does not itself add half-duplex risk. The endpoint schedule
+conserves every service-flow reservation and supplies a separate exposure;
+the pair-local RF risk contract composes both quantities while retaining them
+as separate diagnostics.
 
 ## Proven limits and monotonicity
 

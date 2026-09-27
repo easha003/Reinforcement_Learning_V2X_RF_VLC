@@ -122,11 +122,13 @@ invariant that a distant action change cannot alter focal demand.
 ## Explicitly deferred boundaries
 
 The live environment still uses the old global pool until all migration
-boundaries are ready. Pair-local sensing, collision/CBR responses, and endpoint
-half-duplex exposure are implemented and tested but, like this topology
-boundary, are not yet connected to rollout. The remaining changes are:
+boundaries are ready. Pair-local sensing, collision/CBR responses, endpoint
+half-duplex exposure, and analytical RF attempt-risk composition are
+implemented and tested but, like this topology boundary, are not yet connected
+to rollout. The remaining changes are:
 
-1. Pair-specific packet-risk and outcome assembly.
+1. Pair-specific packet-risk and sampled-outcome assembly from the completed
+   attempt-risk boundary.
 2. Delayed local/aggregate congestion feedback semantics.
 3. Baseline and oracle migration to overlapping local domains.
 4. Removal or archival of the old global `D_t` physical-risk path.
