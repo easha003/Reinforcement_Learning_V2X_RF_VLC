@@ -1,0 +1,15 @@
+# One-factor arm: 100x faster projected dual ascent at every density.
+training:
+  density_multipliers:
+    - density_veh_per_lane_km: 10.0
+      initial_value: 0.0
+      learning_rate: 5.0
+      maximum: 1000000.0
+    - density_veh_per_lane_km: 20.0
+      initial_value: 0.0
+      learning_rate: 5.0
+      maximum: 1000000.0
+    - density_veh_per_lane_km: 30.0
+      initial_value: 0.0
+      learning_rate: 5.0
+      maximum: 1000000.0

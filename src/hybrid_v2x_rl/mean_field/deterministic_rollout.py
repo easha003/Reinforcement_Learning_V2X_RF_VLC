@@ -26,7 +26,7 @@ from typing import Final, Protocol, cast
 import numpy as np
 
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
-from hybrid_v2x_rl.config.hashing import config_hash
+from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import (
@@ -554,6 +554,9 @@ def run_policy_rollout_with_state(
         source,
         generation_period_s=config.service.generation_period_s,
         expected_config_hash=config_hash(config),
+        expected_config_scope_hashes={
+            "mobility_trace": scope_hash(config, "mobility_trace")
+        },
     )
     action_space = MaskedActionSpace.from_config(
         config.environment,

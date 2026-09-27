@@ -160,6 +160,7 @@ def test_report_separates_observed_campaign_from_supported_density_cells() -> No
     )
     report = StateRegimeAuditReport(
         config_hash="a" * 64,
+        policy_environment_scope_hash="b" * 64,
         environment_seed=1,
         thresholds=_thresholds(),
         windows=(),

@@ -191,6 +191,58 @@ def test_the_seed_the_generator_reads_still_moves_the_mobility_digest() -> None:
     assert scope_hash(edited, "mobility") != scope_hash(base, "mobility")
 
 
+def test_optimizer_changes_do_not_move_current_artifact_compatibility_scopes() -> None:
+    base = canonical_data(load_headline_config(PROJECT_ROOT))
+    edited = copy.deepcopy(base)
+    edited["training"]["entropy_coefficient"] = 0.05
+    for multiplier in edited["training"]["density_multipliers"]:
+        multiplier["learning_rate"] = 5.0
+
+    assert config_hash(edited) != config_hash(base)
+    assert scope_hash(edited, "mobility_trace") == scope_hash(base, "mobility_trace")
+    assert scope_hash(edited, "policy_environment") == scope_hash(
+        base, "policy_environment"
+    )
+
+
+def test_current_artifact_scopes_keep_the_root_seed() -> None:
+    base = canonical_data(load_headline_config(PROJECT_ROOT))
+    edited = copy.deepcopy(base)
+    edited["training"]["root_seed"] += 1
+
+    for scope in ("mobility_trace", "policy_environment"):
+        assert scope_hash(edited, scope) != scope_hash(base, scope)
+
+
+def test_policy_environment_scope_is_stricter_than_trace_replay_scope() -> None:
+    base = canonical_data(load_headline_config(PROJECT_ROOT))
+    edited = copy.deepcopy(base)
+    edited["rf"]["collision_model_placeholder"] = 1.0
+
+    assert scope_hash(edited, "mobility_trace") == scope_hash(base, "mobility_trace")
+    assert scope_hash(edited, "policy_environment") != scope_hash(
+        base, "policy_environment"
+    )
+
+
+@pytest.mark.parametrize(
+    "section,field,value",
+    [
+        ("mobility", "speed_limit_mps", 12.0),
+        ("geometry", "min_separation_m", 6.0),
+    ],
+)
+def test_physical_trace_edits_move_both_current_compatibility_scopes(
+    section: str, field: str, value: object
+) -> None:
+    base = canonical_data(load_headline_config(PROJECT_ROOT))
+    edited = copy.deepcopy(base)
+    edited[section][field] = value
+
+    for scope in ("mobility_trace", "policy_environment"):
+        assert scope_hash(edited, scope) != scope_hash(base, scope)
+
+
 def test_a_scope_digest_still_honours_the_global_exclusions() -> None:
     base = canonical_data(load_headline_config(PROJECT_ROOT))
     edited = copy.deepcopy(base)

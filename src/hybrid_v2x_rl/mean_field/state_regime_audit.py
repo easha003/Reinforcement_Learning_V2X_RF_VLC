@@ -29,7 +29,7 @@ from typing import Final, Literal, cast
 import numpy as np
 
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
-from hybrid_v2x_rl.config.hashing import config_hash
+from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import (
@@ -60,7 +60,7 @@ from hybrid_v2x_rl.mean_field.policy_interface import (
 )
 from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 
-STATE_REGIME_AUDIT_SCHEMA: Final = "hybrid-rf-vlc-rl.state-regime-audit.v2"
+STATE_REGIME_AUDIT_SCHEMA: Final = "hybrid-rf-vlc-rl.state-regime-audit.v3"
 
 RegimeName = Literal[
     "easy_state",
@@ -638,6 +638,7 @@ class WindowSample:
 @dataclass(frozen=True, slots=True)
 class StateRegimeAuditReport:
     config_hash: str
+    policy_environment_scope_hash: str
     environment_seed: int
     thresholds: RegimeThresholds
     windows: tuple[WindowSample, ...]
@@ -704,6 +705,7 @@ class StateRegimeAuditReport:
             "schema": STATE_REGIME_AUDIT_SCHEMA,
             "generated_at_utc": self.generated_at_utc.isoformat(),
             "config_hash": self.config_hash,
+            "policy_environment_scope_hash": self.policy_environment_scope_hash,
             "environment_seed": self.environment_seed,
             "test_split_opened": False,
             "thresholds": self.thresholds.as_dict(),
@@ -863,6 +865,9 @@ def _collect_threshold_window(
         source,
         generation_period_s=config.service.generation_period_s,
         expected_config_hash=config_hash(config),
+        expected_config_scope_hashes={
+            "mobility_trace": scope_hash(config, "mobility_trace")
+        },
     )
     assembler = CausalActorObservationAssembler.from_config(
         config,
@@ -971,6 +976,9 @@ def build_state_regime_audit(
             source,
             generation_period_s=config.service.generation_period_s,
             expected_config_hash=config_hash(config),
+            expected_config_scope_hashes={
+                "mobility_trace": scope_hash(config, "mobility_trace")
+            },
         )
         for start in _window_starts(
             reader,
@@ -1003,6 +1011,9 @@ def build_state_regime_audit(
                 source,
                 generation_period_s=config.service.generation_period_s,
                 expected_config_hash=config_hash(config),
+                expected_config_scope_hashes={
+                    "mobility_trace": scope_hash(config, "mobility_trace")
+                },
             )
             for start in _window_starts(
                 reader,
@@ -1078,6 +1089,7 @@ def build_state_regime_audit(
     )
     return StateRegimeAuditReport(
         config_hash=config_hash(config),
+        policy_environment_scope_hash=scope_hash(config, "policy_environment"),
         environment_seed=seed,
         thresholds=thresholds,
         windows=tuple(windows),

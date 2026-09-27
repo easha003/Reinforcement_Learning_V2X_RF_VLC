@@ -24,7 +24,7 @@ from hybrid_v2x_rl.agents.masked_categorical import (
     MaskedCategorical,
     SharedCategoricalActor,
 )
-from hybrid_v2x_rl.config.hashing import config_hash
+from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import (
@@ -601,6 +601,7 @@ class _FrozenPPORegimePolicy:
 @dataclass(frozen=True, slots=True)
 class PPORegimeEvaluationReport:
     config_hash: str
+    policy_environment_scope_hash: str
     checkpoint_path: Path
     checkpoint_sha256: str
     checkpoint_policy_seed: int
@@ -622,6 +623,7 @@ class PPORegimeEvaluationReport:
             "generated_at_utc": self.generated_at_utc.isoformat(),
             "scope": "bounded deterministic validation evaluation of a frozen PPO checkpoint",
             "config_hash": self.config_hash,
+            "policy_environment_scope_hash": self.policy_environment_scope_hash,
             "test_split_opened": False,
             "action_selection": "deterministic masked argmax",
             "reliability_miss_budget": self.miss_budget,
@@ -685,7 +687,7 @@ class PPORegimeEvaluationReport:
 def _load_audit(
     path: Path,
     *,
-    expected_config_hash: str,
+    expected_policy_environment_scope_hash: str,
 ) -> tuple[RegimeThresholds, tuple[EvaluationWindow, ...], int, str]:
     try:
         raw = path.read_bytes()
@@ -698,9 +700,12 @@ def _load_audit(
     if not isinstance(payload, Mapping):
         raise PPORegimeEvaluationError("state-regime audit must contain a mapping")
     if payload.get("schema") != STATE_REGIME_AUDIT_SCHEMA:
-        raise PPORegimeEvaluationError("state-regime audit schema is not frozen v2")
-    if payload.get("config_hash") != expected_config_hash:
-        raise PPORegimeEvaluationError("state-regime audit config hash differs from evaluation")
+        raise PPORegimeEvaluationError("state-regime audit schema is not frozen v3")
+    audit_scope_hash = payload.get("policy_environment_scope_hash")
+    if audit_scope_hash != expected_policy_environment_scope_hash:
+        raise PPORegimeEvaluationError(
+            "state-regime audit policy-environment scope differs from evaluation"
+        )
     if payload.get("test_split_opened") is not False:
         raise PPORegimeEvaluationError("state-regime audit does not prove test isolation")
     claim = payload.get("coverage_claim")
@@ -772,9 +777,10 @@ def build_ppo_regime_evaluation(
     checkpoint = Path(checkpoint_path).expanduser().resolve(strict=True)
     audit = Path(state_regime_audit_path).expanduser().resolve(strict=True)
     digest = config_hash(config)
+    policy_environment_digest = scope_hash(config, "policy_environment")
     thresholds, windows, environment_seed, audit_sha256 = _load_audit(
         audit,
-        expected_config_hash=digest,
+        expected_policy_environment_scope_hash=policy_environment_digest,
     )
     python_rng = random.getstate()
     numpy_rng = np.random.get_state()
@@ -832,6 +838,7 @@ def build_ppo_regime_evaluation(
     densities = tuple(window.density for window in windows)
     return PPORegimeEvaluationReport(
         config_hash=digest,
+        policy_environment_scope_hash=policy_environment_digest,
         checkpoint_path=checkpoint,
         checkpoint_sha256=restored.sha256,
         checkpoint_policy_seed=restored.policy_seed,

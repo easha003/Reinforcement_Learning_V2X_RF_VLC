@@ -27,7 +27,9 @@ import numpy as np
 import pyarrow as pa  # type: ignore[import-untyped]
 import pyarrow.compute as pc  # type: ignore[import-untyped]
 import pyarrow.parquet as pq  # type: ignore[import-untyped]
+import yaml
 
+from hybrid_v2x_rl.config.hashing import scope_hash
 from hybrid_v2x_rl.config.models import TraceSplitConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.geometry.spatial_index import SpatialIndex
@@ -49,6 +51,32 @@ _TIME_TOLERANCE_S = 1e-9
 
 class FrameReplayError(HybridV2XError):
     """A trace cannot be represented by the frozen population-frame contract."""
+
+
+def _archived_config_scope_hash(path: Path, scope: str) -> str:
+    """Hash one integrity-protected archived config under the current scope."""
+
+    config_path = path / "resolved_config.yaml"
+    try:
+        payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise FrameReplayError(
+            "trace archived configuration cannot be read",
+            artifact_path=config_path,
+        ) from error
+    if not isinstance(payload, Mapping):
+        raise FrameReplayError(
+            "trace archived configuration must be a mapping",
+            artifact_path=config_path,
+        )
+    try:
+        return scope_hash(payload, scope)
+    except HybridV2XError as error:
+        raise FrameReplayError(
+            "trace archived configuration cannot satisfy the requested scope",
+            artifact_path=config_path,
+            context={"scope": scope},
+        ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -838,6 +866,7 @@ class PopulationFrameReader:
         *,
         generation_period_s: float,
         expected_config_hash: str | None = None,
+        expected_config_scope_hashes: Mapping[str, str] | None = None,
     ) -> None:
         if (
             isinstance(generation_period_s, bool)
@@ -858,7 +887,15 @@ class PopulationFrameReader:
                     "artifact": manifest.artifact_id,
                 },
             )
-        if expected_config_hash is not None and manifest.config_hash != expected_config_hash:
+        exact_config_match = (
+            expected_config_hash is not None
+            and manifest.config_hash == expected_config_hash
+        )
+        if (
+            expected_config_hash is not None
+            and not exact_config_match
+            and expected_config_scope_hashes is None
+        ):
             raise FrameReplayError(
                 "trace artifact was generated from a different configuration",
                 context={
@@ -867,6 +904,47 @@ class PopulationFrameReader:
                     "expected_config_hash": expected_config_hash,
                 },
             )
+        if expected_config_scope_hashes is not None:
+            if not isinstance(expected_config_scope_hashes, Mapping) or not (
+                expected_config_scope_hashes
+            ):
+                raise ValueError("expected config scope hashes must be a nonempty mapping")
+            for scope, expected in expected_config_scope_hashes.items():
+                if (
+                    not isinstance(scope, str)
+                    or not scope.strip()
+                    or not isinstance(expected, str)
+                    or len(expected) != 64
+                    or any(character not in "0123456789abcdef" for character in expected)
+                ):
+                    raise ValueError("expected config scope hashes must be named SHA-256 values")
+                # An exact run-digest match is already the stronger contract.
+                # Scope reconstruction is the explicit fallback for an artifact
+                # created before optimizer-only values changed.
+                if exact_config_match:
+                    continue
+                archived = _archived_config_scope_hash(source.path, scope)
+                recorded = manifest.config_scope_hashes.get(scope)
+                if recorded is not None and recorded != archived:
+                    raise FrameReplayError(
+                        "trace manifest scope hash differs from its archived configuration",
+                        context={
+                            "trace_id": source.trace_id,
+                            "scope": scope,
+                            "manifest_scope_hash": recorded,
+                            "archived_scope_hash": archived,
+                        },
+                    )
+                if archived != expected:
+                    raise FrameReplayError(
+                        "trace artifact is incompatible with the requested configuration scope",
+                        context={
+                            "trace_id": source.trace_id,
+                            "scope": scope,
+                            "artifact_scope_hash": archived,
+                            "expected_scope_hash": expected,
+                        },
+                    )
         duration = self.trace.report.last_time_s - self.trace.report.first_time_s
         self.last_frame_index = _frame_floor(
             self.trace.report.last_time_s,

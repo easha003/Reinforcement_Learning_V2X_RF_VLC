@@ -1,0 +1,4 @@
+# Common bounded recovery protocol. All headline training settings, including
+# the 1e-2 -> 1e-3 -> 1e-4 curriculum, remain unchanged except run length.
+training:
+  total_transitions_per_seed: 300000

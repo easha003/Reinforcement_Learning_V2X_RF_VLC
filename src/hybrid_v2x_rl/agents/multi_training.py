@@ -52,7 +52,7 @@ from hybrid_v2x_rl.agents.training_metrics import (
     TrainingMetricsJSONL,
     build_training_iteration_metrics,
 )
-from hybrid_v2x_rl.config.hashing import config_hash
+from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.policy_actions import PolicyAction
 from hybrid_v2x_rl.mean_field.critic_observations import CentralizedCriticBuilder
@@ -745,6 +745,9 @@ def _population_reader(
             source,
             generation_period_s=config.service.generation_period_s,
             expected_config_hash=config_hash(config),
+            expected_config_scope_hashes={
+                "mobility_trace": scope_hash(config, "mobility_trace")
+            },
         )
         cache[source_path] = reader
     return reader

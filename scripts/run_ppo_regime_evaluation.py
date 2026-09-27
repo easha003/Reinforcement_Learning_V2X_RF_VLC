@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 
 from hybrid_v2x_rl.agents.regime_evaluation import build_ppo_regime_evaluation
-from hybrid_v2x_rl.config.loader import load_headline_config
+from hybrid_v2x_rl.config.loader import headline_config_layers, load_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,6 +19,15 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=PROJECT_ROOT,
         help="repository root containing configuration and trace artifacts",
+    )
+    parser.add_argument(
+        "--config",
+        action="append",
+        type=Path,
+        help=(
+            "Layered YAML configuration path; repeat in merge order. "
+            "Defaults to the headline layers."
+        ),
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument(
@@ -41,7 +50,12 @@ def _resolve(project_root: Path, value: Path) -> Path:
 def main() -> int:
     args = _parser().parse_args()
     project_root = args.project_root.expanduser().resolve()
-    config = load_headline_config(project_root)
+    layers = (
+        tuple(_resolve(project_root, path) for path in args.config)
+        if args.config
+        else headline_config_layers(project_root)
+    )
+    config = load_config(layers, project_root=project_root)
     report = build_ppo_regime_evaluation(
         config,
         checkpoint_path=_resolve(project_root, args.checkpoint),

@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from hybrid_v2x_rl.artifacts.store import ArtifactStore
+from hybrid_v2x_rl.config import config_hash, load_headline_config
+from hybrid_v2x_rl.config.hashing import scope_hash
 from hybrid_v2x_rl.config.models import TraceSplitConfig
 from hybrid_v2x_rl.mean_field.frame_cache import (
     CACHE_EXCLUDES,
@@ -29,6 +31,7 @@ from hybrid_v2x_rl.mobility.trace_io import MobilityTraceWriter, VehicleTraceRec
 
 TRACE_ID = "synthetic-d10-train-000"
 CONFIG_HASH = "a" * 64
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _vehicle(trace_id: str, time_s: float, index: int) -> VehicleTraceRecord:
@@ -666,6 +669,56 @@ def test_artifact_configuration_mismatch_is_rejected(trace_path: Path) -> None:
             source,
             generation_period_s=0.1,
             expected_config_hash="b" * 64,
+        )
+
+
+def test_trace_replay_scope_allows_optimizer_changes_but_rejects_mobility_changes(
+    tmp_path: Path,
+) -> None:
+    config = load_headline_config(PROJECT_ROOT)
+    artifact = MobilityTraceWriter(
+        ArtifactStore(tmp_path / "scoped-artifacts"),
+        rows_per_part=7,
+    ).write(
+        trace_id=TRACE_ID,
+        vehicles=(
+            _vehicle(TRACE_ID, time_s, vehicle)
+            for time_s in (0.0, 0.1)
+            for vehicle in (1, 2)
+        ),
+        signals=(),
+        pairs=(_pair("pair-a", "veh-1", "veh-2", 0.0, 0.1, "trace_end"),),
+        network_definition="{}",
+        route_definition="{}",
+        resolved_config_yaml=config.model_dump_json(indent=2),
+        config_hash=config_hash(config),
+        code_version="test",
+        random_seeds={"mobility": 7},
+    )
+    source = FrameTraceSource.discover(artifact.path)
+    changed_training = config.training.model_copy(update={"entropy_coefficient": 0.05})
+    optimizer_variant = config.model_copy(update={"training": changed_training})
+
+    reader = PopulationFrameReader(
+        source,
+        generation_period_s=config.service.generation_period_s,
+        expected_config_hash=config_hash(optimizer_variant),
+        expected_config_scope_hashes={
+            "mobility_trace": scope_hash(optimizer_variant, "mobility_trace")
+        },
+    )
+    assert reader.trace.artifact.manifest.config_hash == config_hash(config)
+
+    changed_mobility = config.mobility.model_copy(update={"speed_limit_mps": 12.0})
+    physical_variant = config.model_copy(update={"mobility": changed_mobility})
+    with pytest.raises(FrameReplayError, match="incompatible.*scope"):
+        PopulationFrameReader(
+            source,
+            generation_period_s=config.service.generation_period_s,
+            expected_config_hash=config_hash(physical_variant),
+            expected_config_scope_hashes={
+                "mobility_trace": scope_hash(physical_variant, "mobility_trace")
+            },
         )
 
 

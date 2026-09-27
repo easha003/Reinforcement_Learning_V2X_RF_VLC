@@ -34,6 +34,32 @@ full, every trace stores its complete ``resolved_config.yaml``, and the
 campaign manifest records the split map explicitly.
 """
 
+# Per-artifact-class digests answer whether a producer's inputs agree.  The
+# exclusion lists are fail-safe: an unreviewed new field remains in a scope and
+# can cause only a visible, wasteful incompatibility rather than unsafe reuse.
+# ``mobility`` is legacy provenance. ``mobility_trace`` is the replay contract
+# and deliberately retains training.root_seed while excluding every currently
+# known optimizer field.
+_TRAINING_EXCEPT_ROOT_SEED: Final[tuple[tuple[str, ...], ...]] = (
+    ("training", "algorithm"),
+    ("training", "policy_seeds"),
+    ("training", "total_transitions_per_seed"),
+    ("training", "architecture"),
+    ("training", "rollout_packets"),
+    ("training", "minibatch_size"),
+    ("training", "update_epochs"),
+    ("training", "learning_rate"),
+    ("training", "gamma"),
+    ("training", "gae_lambda"),
+    ("training", "clip_ratio"),
+    ("training", "entropy_coefficient"),
+    ("training", "cost_signal"),
+    ("training", "curriculum"),
+    ("training", "density_multipliers"),
+    ("training", "checkpoint_selection"),
+    ("training", "normalize_observations_on_training_only"),
+)
+
 HASH_SCOPES: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "mobility": (
         ("observation",),
@@ -43,30 +69,32 @@ HASH_SCOPES: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
         ("cost",),
         ("evaluation",),
     ),
+    # Replay compatibility for immutable mobility traces.  Unlike the legacy
+    # ``mobility`` provenance scope above, this excludes every optimizer field
+    # while retaining training.root_seed, the only training value read by the
+    # trace generator.  Existing artifacts can be checked by hashing their
+    # integrity-protected resolved_config.yaml under this current scope.
+    "mobility_trace": (
+        ("project",),
+        ("paths",),
+        ("observation",),
+        ("rf",),
+        ("vlc",),
+        ("service",),
+        ("cost",),
+        ("evaluation",),
+        ("environment",),
+        *_TRAINING_EXCEPT_ROOT_SEED,
+    ),
+    # Environment/audit compatibility keeps all policy-visible and physical
+    # state definitions while excluding optimizer and reporting choices.
+    "policy_environment": (
+        ("project",),
+        ("paths",),
+        ("evaluation",),
+        *_TRAINING_EXCEPT_ROOT_SEED,
+    ),
 }
-"""Per-artifact-class digests: what each kind of artifact can actually depend on.
-
-``config_hash`` answers "same experimental conditions?" for a whole *run*, and
-that is the right question for a run.  It is the wrong question for one
-artifact.  A mobility trace is produced by a generator that reads
-``mobility``, ``geometry``, ``environment`` and ``training.root_seed`` and
-nothing else, so editing a receiver field or a PPO hyperparameter cannot move a
-single vehicle -- yet under a single global digest it strands every trace under
-a stale hash and forces hours of recomputation to reproduce identical bytes.
-
-This is not hypothetical.  §7.2's collision model is undefined, so implementing
-M3 will add configuration; without scoping, that alone invalidates the mobility
-campaign.
-
-Each entry lists paths a scope's generator provably cannot read, *in addition*
-to :data:`HASH_EXCLUDED_PATHS`.  Exclusion rather than inclusion is deliberate
-and is the fail-safe direction: forgetting to exclude something causes a
-spurious re-stamp, which is visible and merely wasteful, whereas forgetting to
-*include* something would silently let two genuinely different engines share a
-digest.  The list is deliberately conservative -- ``training`` stays in, even
-though only ``root_seed`` is read, because carving out a subtree is where that
-guarantee would start to erode.
-"""
 
 
 def _project_root(value: BaseModel) -> Path | None:
