@@ -803,11 +803,20 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      interpretable RF-link and/or optical-diversity interventions. Keep PPO
      training and the test split blocked until a realizable actual-contract
      design passes `1e-4` at every validation density.
-     - [ ] Execute the predeclared RF-decoding reliability-scaling diagnostic
+     - [x] Execute the predeclared RF-decoding reliability-scaling diagnostic
        at divisors `1x, 2x, 4x, 8x, 16x, 32x`. It replays the frozen validation
        truth once, calculates the optimistic lower bound without joint-action
        search, and cannot authorize training. See
-       `PHASE8_RF_DECODING_RELIABILITY_SCALING.md`.
+       `PHASE8_RF_DECODING_RELIABILITY_SCALING.md`. Factor `1x` exactly
+       reproduced the frozen frontier; both fallback views first pass at the
+       declared `2x` point. The limiting continuous optimistic threshold is
+       `1.620462x` at density 20. Training remains blocked because contention
+       and half-duplex risk were intentionally excluded.
+     - [ ] Translate the required RF decoding improvement into physically
+       interpretable link configurations with explicit coding, MCS, power, or
+       independent-diversity assumptions. Freeze the configurations and their
+       calibration evidence before running another certificate-aware joint
+       feasibility frontier; do not treat the abstract divisor as deployable.
 5. [x] Apply the reliability curriculum:
 
    ```text

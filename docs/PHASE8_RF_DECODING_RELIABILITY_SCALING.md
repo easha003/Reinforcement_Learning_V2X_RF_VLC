@@ -1,6 +1,6 @@
 # Phase 8 RF-decoding reliability-scaling diagnostic
 
-Status: protocol and executor implemented; result not yet executed
+Status: complete; `2x` is the first declared passing factor; training remains blocked
 
 Date frozen: 2026-09-28
 
@@ -78,3 +78,60 @@ density rows without evaluating a channel frame. It also verified the source
 frontier declaration and result digests, factor-one anchor identity, closed
 test split, absent actor and checkpoint, disabled joint-action search, and
 disabled training authorization.
+
+## Result
+
+The diagnostic completed on 2026-09-28. The result SHA-256 is
+`30dbf82aa5a5d056f180fcb18345560238f5eba3c0a583b2e245418a193521ff`.
+Factor `1x` reproduced the completed frontier's all-rows lower bound exactly,
+so the source baseline is reconciled before interpreting any scaled result.
+
+The actual fallback contract and the all-rows diagnostic produced the same
+lower bounds throughout this experiment:
+
+| RF decoding-failure divisor | d10 lower bound | d20 lower bound | d30 lower bound | All densities pass? |
+|---:|---:|---:|---:|---|
+| `1x` | `2.271923e-4` | `6.895343e-4` | `3.897709e-4` | no |
+| `2x` | `1.419952e-5` | `4.309589e-5` | `2.436068e-5` | yes |
+| `4x` | `8.874701e-7` | `2.693493e-6` | `1.522543e-6` | yes |
+| `8x` | `5.546688e-8` | `1.683433e-7` | `9.515891e-8` | yes |
+| `16x` | `3.466680e-9` | `1.052146e-8` | `5.947432e-9` | yes |
+| `32x` | `2.166675e-10` | `6.575911e-10` | `3.717145e-10` | yes |
+
+The views agree because every bound-minimizing action uses four RF attempts.
+Usable rows choose either `RF-4` or `DUP-4`, and the actual fallback already
+forces `DUP-4` on unusable rows. Scaling RF decoding failure by a divisor
+`g` therefore scales every selected packet-level propagation term by
+`1 / g^4`; the intervention does not change the minimizing actions.
+
+The continuous factor at which each density's unchanged four-attempt bound
+would exactly equal the budget is:
+
+| Density (vehicles/lane-km) | Exact analytical divisor |
+|---:|---:|
+| 10 | `1.227717` |
+| 20 | `1.620462` |
+| 30 | `1.405084` |
+
+Density 20 is limiting. Thus `1.620462x` is the optimistic mathematical
+threshold for this diagnostic and `2x` is the first predeclared passing point.
+At `2x`, the largest bound is `4.309589e-5`, or `0.431x` the budget.
+
+## Interpretation and next task
+
+This result corrects the earlier coarse intuition that the per-attempt RF
+failure probability itself might need an order-of-magnitude improvement. Four
+attempts compound the improvement, so the optimistic propagation floor crosses
+the target between `1x` and `2x`.
+
+It does not show that a realizable system passes. The completed frontier's
+candidate risks also include contention and receiver half-duplex exposure,
+which this diagnostic deliberately removes. The `2x` divisor is an abstract
+sensitivity parameter, not yet a claim about transmit power, coding, MCS, or a
+specific radio implementation.
+
+The immediate next task is to map a decoding-failure reduction of at least
+`1.620462x`, with engineering margin represented by the `2x` point, to one or
+more physically interpretable RF configurations. Those configurations must be
+frozen before a new certificate-aware joint feasibility frontier is run. PPO
+training and the held-out test split remain blocked.
