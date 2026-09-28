@@ -136,6 +136,7 @@ class _AdvancedPairState:
     geometry: PairGeometry
     occluded: bool
     fading_power_gains: tuple[float, ...]
+    secondary_fading_power_gains: tuple[float, ...]
 
 
 ActionChooser = Callable[[PacketContext], Action]
@@ -241,7 +242,12 @@ class Rollout:
         return tuple(centres[index % resources] for index in range(attempts))
 
     def _tape(
-        self, trace_id: str, pair_id: str, index: int, fading_gains: Iterable[float]
+        self,
+        trace_id: str,
+        pair_id: str,
+        index: int,
+        fading_gains: Iterable[float],
+        secondary_fading_gains: Iterable[float] = (),
     ) -> PacketTape:
         """A tape derived from packet identity so it cannot drift with order."""
 
@@ -261,6 +267,9 @@ class Rollout:
             rf_attempts=attempts,
             vlc=VLCPacketRandomness(float(rng.random())),
             rf_fading_power_gains=tuple(float(g) for g in fading_gains),
+            rf_secondary_fading_power_gains=tuple(
+                float(g) for g in secondary_fading_gains
+            ),
         )
 
     def evaluate_instant(
@@ -290,7 +299,13 @@ class Rollout:
             neighbours=neighbours,
             index_of_frame=index_of_frame,
         )
-        tape = self._tape(trace_id, pair_id, index, state.fading_power_gains)
+        tape = self._tape(
+            trace_id,
+            pair_id,
+            index,
+            state.fading_power_gains,
+            state.secondary_fading_power_gains,
+        )
 
         propagation = state.rf_propagation_request
         rf_request = RFChannelRequest(
@@ -305,6 +320,9 @@ class Rollout:
             neighbour_count=state.context.neighbour_count,
             sensed_fraction=self.sensed_fraction,
             randomness=tape.rf_attempts[0],
+            secondary_fading_power_gain=(
+                propagation.secondary_fading_power_gain
+            ),
         )
         vlc_request = VLCChannelRequest(
             geometry=state.geometry,
@@ -453,13 +471,27 @@ class Rollout:
             )
             blockage_db = max(0.0, mean + sigma * residual)
 
-        gains = self.fading.advance(
-            pair_id,
-            elapsed_s=elapsed_s,
-            tx_speed_mps=transmitter.speed_mps,
-            rx_speed_mps=receiver.speed_mps,
-            state=visibility.state,
-        )
+        receive_diversity = self.lifecycle.rf.receive_diversity
+        secondary_gains: tuple[float, ...] = ()
+        if receive_diversity.is_siso:
+            gains = self.fading.advance(
+                pair_id,
+                elapsed_s=elapsed_s,
+                tx_speed_mps=transmitter.speed_mps,
+                rx_speed_mps=receiver.speed_mps,
+                state=visibility.state,
+            )
+        else:
+            branch_gains = self.fading.advance_receive_branches(
+                pair_id,
+                elapsed_s=elapsed_s,
+                tx_speed_mps=transmitter.speed_mps,
+                rx_speed_mps=receiver.speed_mps,
+                state=visibility.state,
+                branch_correlation=receive_diversity.branch_correlation,
+            )
+            gains = branch_gains[0]
+            secondary_gains = tuple(float(gain) for gain in branch_gains[1])
 
         context = PacketContext(
             trace_id=trace_id,
@@ -483,6 +515,9 @@ class Rollout:
             # contract's focal attempt; legacy replay below still consumes the
             # complete per-attempt sequence from ``fading_power_gains``.
             fading_power_gain=float(gains[0]),
+            secondary_fading_power_gain=(
+                secondary_gains[0] if secondary_gains else None
+            ),
         )
         return _AdvancedPairState(
             context=context,
@@ -490,6 +525,7 @@ class Rollout:
             geometry=geometry,
             occluded=occluded,
             fading_power_gains=tuple(float(gain) for gain in gains),
+            secondary_fading_power_gains=secondary_gains,
         )
 
     def release(self, pair_id: str) -> None:

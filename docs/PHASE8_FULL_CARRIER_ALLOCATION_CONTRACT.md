@@ -103,6 +103,7 @@ The receive-diversity experiment is now frozen in
 `PHASE8_RECEIVE_DIVERSITY_FRONTIER_DECLARATION.md`. It explicitly declares the
 antenna count, combining and channel-state-information assumptions, branch
 correlation, secondary-chain implementation loss, and sensitivity bands over
-this corrected 1/2/4 full-carrier resource axis. The next task is to implement
-and verify that physical branch/combiner model before executing any affected
-certificate-aware frontier cell.
+this corrected 1/2/4 full-carrier resource axis. That physical branch/combiner
+model is now implemented and verified in
+`PHASE8_RECEIVE_DIVERSITY_PHYSICAL_MODEL.md`; the next task is the frozen
+screening and certificate-aware execution sequence.

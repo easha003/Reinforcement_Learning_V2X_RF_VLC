@@ -79,6 +79,12 @@ def test_only_the_literature_bounded_headline_profile_can_authorize() -> None:
     assert independent
     assert all(not profile.authorizes_training for profile in independent)
 
+    physical = declaration.headline_receive_profile.physical_profile()
+    assert physical.antenna_count == 2
+    assert physical.branch_correlation == pytest.approx(0.03**0.5)
+    assert physical.implementation_loss_db == pytest.approx(3.5)
+    assert declaration.control_profile.physical_profile().is_siso
+
 
 def test_dry_run_evaluates_no_frames_and_opens_no_test_data() -> None:
     declaration = load_receive_diversity_frontier_declaration(
@@ -92,9 +98,29 @@ def test_dry_run_evaluates_no_frames_and_opens_no_test_data() -> None:
     assert report["schema"] == RECEIVE_DIVERSITY_FRONTIER_DECLARATION_SCHEMA
     assert report["receive_profiles"] == 10
     assert report["evaluation_cells_before_screening"] == 360
+    assert report["physical_profile_instances"] == 0
     assert report["channel_frames_evaluated"] == 0
     assert report["training_authorized"] is False
     assert report["test_split_opened"] is False
+
+
+def test_wired_dry_run_reaches_every_receive_profile_and_source_point() -> None:
+    declaration = load_receive_diversity_frontier_declaration(
+        DECLARATION_PATH,
+        project_root=PROJECT_ROOT,
+        verify_evidence=False,
+    )
+    if not declaration.source_frontier.window_source.is_file():
+        pytest.skip("frozen evaluation artifact is not present in this checkout")
+
+    report = structural_receive_diversity_dry_run(
+        declaration,
+        project_root=PROJECT_ROOT,
+    )
+
+    assert report["source_validation_windows"] == 9
+    assert report["physical_profile_instances"] == 180
+    assert report["channel_frames_evaluated"] == 0
 
 
 def test_source_frontier_digest_drift_fails_closed(tmp_path: Path) -> None:

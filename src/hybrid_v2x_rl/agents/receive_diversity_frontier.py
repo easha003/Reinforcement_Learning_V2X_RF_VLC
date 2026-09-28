@@ -16,12 +16,18 @@ from itertools import product
 from pathlib import Path
 from typing import Final, Literal, cast
 
+from hybrid_v2x_rl.agents.system_feasibility_execution import (
+    structural_dry_run as structural_system_dry_run,
+)
 from hybrid_v2x_rl.agents.system_feasibility_frontier import (
     SystemFeasibilityFrontierDeclaration,
     load_system_feasibility_frontier_declaration,
 )
-from hybrid_v2x_rl.config.loader import load_yaml_file
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
+from hybrid_v2x_rl.config.loader import load_config, load_yaml_file
 from hybrid_v2x_rl.core.errors import HybridV2XError
+from hybrid_v2x_rl.env.assembly import build_rollout
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import LocalRFPhysicsModel
 
 RECEIVE_DIVERSITY_FRONTIER_DECLARATION_SCHEMA: Final = (
     "hybrid-rf-vlc-rl.receive-diversity-frontier-declaration.v1"
@@ -138,6 +144,23 @@ class ReceiveDiversityProfile:
     implementation_loss_db: float | None
     headline: bool
     authorizes_training: bool
+
+    def physical_profile(self) -> RFReceiveDiversity:
+        """Translate the frozen experiment row into the channel contract."""
+
+        if self.combining_rule == "none":
+            return RFReceiveDiversity.siso()
+        if (
+            self.branch_correlation is None
+            or self.implementation_loss_db is None
+        ):  # pragma: no cover - loader construction proves this.
+            raise ReceiveDiversityFrontierError(
+                "MRC receive profile is missing a physical parameter"
+            )
+        return RFReceiveDiversity.two_branch_mrc(
+            branch_correlation=self.branch_correlation,
+            implementation_loss_db=self.implementation_loss_db,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -679,8 +702,52 @@ def load_receive_diversity_frontier_declaration(
 
 def structural_receive_diversity_dry_run(
     declaration: ReceiveDiversityFrontierDeclaration,
+    *,
+    project_root: str | Path | None = None,
 ) -> dict[str, object]:
-    """Summarize the frozen grid without reading frames or evaluating channels."""
+    """Summarize, and optionally wire, the grid without evaluating channels."""
+
+    physical_profile_instances = 0
+    source_windows = 0
+    if project_root is not None:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        source_report = structural_system_dry_run(
+            declaration.source_frontier,
+            project_root=root,
+        )
+        source_windows = len(source_report.windows)
+        for receive_profile in declaration.receive_profiles:
+            physical_profile = receive_profile.physical_profile()
+            for point in declaration.source_frontier.physical_points:
+                config = load_config(
+                    (
+                        *declaration.source_frontier.base_config_layers,
+                        *point.optical_configuration.additional_config_layers,
+                    ),
+                    project_root=root,
+                )
+                local_model = LocalRFPhysicsModel.from_config(
+                    config,
+                    sensitivity_band=point.sensing_band.band,
+                    collision_subchannels=point.rf_capacity.subchannels,
+                )
+                rollout = build_rollout(
+                    config,
+                    buildings=local_model.buildings,
+                    root_seed=declaration.source_frontier.environment_seed,
+                    band=point.sensing_band.band,
+                    collision_subchannels=point.rf_capacity.subchannels,
+                    receive_diversity=physical_profile,
+                )
+                if (
+                    rollout.lifecycle.rf.receive_diversity != physical_profile
+                    or rollout.lifecycle.rf.collision
+                    != local_model.response_model.parameters
+                ):
+                    raise ReceiveDiversityFrontierError(
+                        "receive profile did not reach the pair-local physical path"
+                    )
+                physical_profile_instances += 1
 
     return {
         "schema": RECEIVE_DIVERSITY_FRONTIER_DECLARATION_SCHEMA,
@@ -691,6 +758,8 @@ def structural_receive_diversity_dry_run(
         "source_fallback_views": len(declaration.source_frontier.fallback_views),
         "evaluation_cells_before_screening": declaration.evaluation_cells_before_screening,
         "headline_receive_profile": declaration.headline_receive_profile.name,
+        "source_validation_windows": source_windows,
+        "physical_profile_instances": physical_profile_instances,
         "channel_frames_evaluated": 0,
         "training_authorized": False,
         "test_split_opened": False,

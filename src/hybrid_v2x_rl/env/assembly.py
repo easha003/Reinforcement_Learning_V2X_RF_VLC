@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand, headline_parameters
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.channels.rf.model import NRV2XChannel
 from hybrid_v2x_rl.channels.vlc.headlamp_pattern import load_pattern
 from hybrid_v2x_rl.channels.vlc.model import VVLCChannel
@@ -46,6 +47,7 @@ def build_rf_channel(
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
     collision_subchannels: int | None = None,
+    receive_diversity: RFReceiveDiversity | None = None,
 ) -> NRV2XChannel:
     """The radio façade for this profile.
 
@@ -87,6 +89,11 @@ def build_rf_channel(
         blocklength=channel_uses,
         information_bits=(config.service.payload_bytes + config.rf.timing.framing_overhead_bytes) * 8,
         collision=collision,
+        receive_diversity=(
+            RFReceiveDiversity.siso()
+            if receive_diversity is None
+            else receive_diversity
+        ),
     )
 
 
@@ -139,6 +146,7 @@ def build_lifecycle(
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
     collision_subchannels: int | None = None,
+    receive_diversity: RFReceiveDiversity | None = None,
 ) -> PacketLifecycle:
     """Both façades and the deadline, assembled and checked for feasibility."""
 
@@ -148,6 +156,7 @@ def build_lifecycle(
             band=band,
             rf_usage_fraction=rf_usage_fraction,
             collision_subchannels=collision_subchannels,
+            receive_diversity=receive_diversity,
         ),
         vlc=build_vlc_channel(config),
         timing=build_timing(config),
@@ -162,6 +171,7 @@ def build_rollout(
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
     collision_subchannels: int | None = None,
+    receive_diversity: RFReceiveDiversity | None = None,
 ) -> Rollout:
     """A rollout wired to this profile, including the receiver's acceptance cone.
 
@@ -177,6 +187,7 @@ def build_rollout(
             band=band,
             rf_usage_fraction=rf_usage_fraction,
             collision_subchannels=collision_subchannels,
+            receive_diversity=receive_diversity,
         ),
         buildings=tuple(buildings),
         root_seed=root_seed,

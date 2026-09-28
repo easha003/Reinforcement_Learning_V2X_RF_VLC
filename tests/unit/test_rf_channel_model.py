@@ -8,12 +8,14 @@ measurement rather than a sample.
 
 from __future__ import annotations
 
+import math
 from dataclasses import fields
 
 import numpy as np
 import pytest
 
 from hybrid_v2x_rl.channels.rf.collision import headline_parameters
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.channels.rf.model import (
     NRV2XChannel,
     RFChannelError,
@@ -28,7 +30,9 @@ BLOCKLENGTH = 2419
 INFORMATION_BITS = 2784
 
 
-def channel() -> NRV2XChannel:
+def channel(
+    receive_diversity: RFReceiveDiversity | None = None,
+) -> NRV2XChannel:
     return NRV2XChannel(
         carrier_hz=5.9e9,
         bandwidth_hz=10e6,
@@ -36,6 +40,11 @@ def channel() -> NRV2XChannel:
         blocklength=BLOCKLENGTH,
         information_bits=INFORMATION_BITS,
         collision=headline_parameters(),
+        receive_diversity=(
+            RFReceiveDiversity.siso()
+            if receive_diversity is None
+            else receive_diversity
+        ),
     )
 
 
@@ -69,6 +78,7 @@ def propagation_request(
     blockage_db: float = 0.0,
     shadowing: float = 0.0,
     fading: float = 1.0,
+    secondary_fading: float | None = None,
 ) -> RFPropagationRequest:
     return RFPropagationRequest(
         distance_m=distance_m,
@@ -76,6 +86,7 @@ def propagation_request(
         blockage_db=blockage_db,
         shadowing_normalized=shadowing,
         fading_power_gain=fading,
+        secondary_fading_power_gain=secondary_fading,
     )
 
 
@@ -131,6 +142,7 @@ def test_propagation_boundary_contains_no_policy_or_contention_inputs() -> None:
         "blockage_db",
         "shadowing_normalized",
         "fading_power_gain",
+        "secondary_fading_power_gain",
     )
 
 
@@ -165,6 +177,50 @@ def test_propagation_evaluation_preserves_the_legacy_physical_budget() -> None:
     assert propagation.decoding_failure_probability == pytest.approx(
         legacy.decoding_failure_probability
     )
+
+
+def test_two_branch_mrc_combines_instantaneous_snr_before_decoding() -> None:
+    profile = RFReceiveDiversity.two_branch_mrc(
+        branch_correlation=0.17320508075688773,
+        implementation_loss_db=3.5,
+    )
+    model = channel(profile)
+    primary, secondary = 0.25, 0.75
+
+    result = model.evaluate_propagation(
+        propagation_request(
+            state=RFPropagationState.NLOS,
+            fading=primary,
+            secondary_fading=secondary,
+        )
+    )
+
+    expected = primary + math.pow(10.0, -3.5 / 10.0) * secondary
+    assert result.fading_gain_linear == pytest.approx(expected)
+    assert result.branch_fading_power_gains == (primary, secondary)
+    assert result.receive_antenna_count == 2
+    assert result.combining_rule == "maximum-ratio-combining"
+    assert result.implementation_loss_db == pytest.approx(3.5)
+
+
+def test_mrc_never_worsens_the_established_primary_branch() -> None:
+    request_row = propagation_request(
+        state=RFPropagationState.NLOS,
+        fading=0.05,
+        secondary_fading=0.05,
+    )
+    mrc = channel(
+        RFReceiveDiversity.two_branch_mrc(
+            branch_correlation=0.7,
+            implementation_loss_db=7.0,
+        )
+    ).evaluate_propagation(request_row)
+    siso = channel().evaluate_propagation(
+        propagation_request(state=RFPropagationState.NLOS, fading=0.05)
+    )
+
+    assert mrc.sinr_db > siso.sinr_db
+    assert mrc.decoding_failure_probability <= siso.decoding_failure_probability
 
 
 def test_propagation_evaluation_refuses_the_legacy_coupled_request() -> None:

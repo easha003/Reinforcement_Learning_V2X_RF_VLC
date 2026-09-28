@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 
 from hybrid_v2x_rl.artifacts.store import ArtifactStore
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.config.hashing import config_hash
 from hybrid_v2x_rl.config.loader import load_headline_config
 from hybrid_v2x_rl.core.policy_actions import PolicyAction
@@ -456,6 +458,69 @@ def test_non_deployable_oracle_can_control_unusable_rows_only_when_explicit(
         result.report.transitions
     )
     assert result.normalization_state == frozen_identity
+
+
+def test_receive_diversity_flows_through_the_authoritative_pair_local_path(
+    config,
+    source,
+) -> None:
+    class TruthProbe:
+        name = "receive-diversity-truth-probe"
+        requires_oracle_truth = True
+
+        def __init__(self) -> None:
+            self.propagation = {}
+
+        def select_actions(self, decision, *, channel_truth):
+            assert channel_truth is not None
+            self.propagation.update(
+                {
+                    pair_id: evaluation.rf_propagation
+                    for pair_id, evaluation in channel_truth.items()
+                }
+            )
+            return tuple(
+                PolicyAction.RF_1 if row.usable else None
+                for row in decision.actor_frame.rows
+            )
+
+    siso_probe = TruthProbe()
+    diversity_probe = TruthProbe()
+    siso = run_policy_rollout_with_state(
+        config,
+        source,
+        policy=siso_probe,
+        environment_seed=81,
+        max_frames=1,
+    )
+    diversity = run_policy_rollout_with_state(
+        config,
+        source,
+        policy=diversity_probe,
+        environment_seed=81,
+        max_frames=1,
+        receive_diversity=RFReceiveDiversity.two_branch_mrc(
+            branch_correlation=math.sqrt(0.03),
+            implementation_loss_db=3.5,
+        ),
+    )
+
+    assert siso.report.matched_tape_fingerprint == (
+        diversity.report.matched_tape_fingerprint
+    )
+    assert siso.report.fingerprint != diversity.report.fingerprint
+    assert tuple(siso_probe.propagation) == tuple(diversity_probe.propagation)
+    for pair_id, mrc in diversity_probe.propagation.items():
+        baseline = siso_probe.propagation[pair_id]
+        assert baseline.receive_antenna_count == 1
+        assert mrc.receive_antenna_count == 2
+        assert mrc.branch_fading_power_gains[0] == pytest.approx(
+            baseline.fading_gain_linear
+        )
+        assert mrc.fading_gain_linear > baseline.fading_gain_linear
+        assert mrc.decoding_failure_probability <= (
+            baseline.decoding_failure_probability
+        )
 
 
 def test_causal_policy_cannot_request_control_of_unusable_rows(config, source) -> None:

@@ -22,6 +22,7 @@ from hybrid_v2x_rl.agents.regime_evaluation import (
     load_frozen_regime_audit,
 )
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
@@ -494,6 +495,7 @@ def evaluate_pair_local_joint_windows(
     oracle_controls_unusable_rows: bool,
     exact_assignment_cap: int,
     max_search_iterations: int,
+    receive_diversity: RFReceiveDiversity | None = None,
 ) -> JointOracleWindowEvaluation:
     """Evaluate one predeclared physical/fallback cell on frozen windows."""
 
@@ -514,6 +516,12 @@ def evaluate_pair_local_joint_windows(
     if not isinstance(sensitivity_band, SensitivityBand):
         raise JointOracleEvaluationError(
             "joint window evaluation requires a declared sensing band"
+        )
+    if receive_diversity is not None and not isinstance(
+        receive_diversity, RFReceiveDiversity
+    ):
+        raise JointOracleEvaluationError(
+            "receive_diversity must be an RFReceiveDiversity profile or None"
         )
     if type(oracle_controls_unusable_rows) is not bool:
         raise JointOracleEvaluationError(
@@ -555,6 +563,7 @@ def evaluate_pair_local_joint_windows(
             frame_observer=policy,
             sensitivity_band=sensitivity_band,
             collision_subchannels=collision_subchannels,
+            receive_diversity=receive_diversity,
             oracle_controls_unusable_rows=oracle_controls_unusable_rows,
         )
         if result.normalization_state != normalization_state:

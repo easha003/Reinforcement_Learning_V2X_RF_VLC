@@ -47,6 +47,10 @@ from hybrid_v2x_rl.channels.rf.collision import (
     collision_probability,
     half_duplex_probability,
 )
+from hybrid_v2x_rl.channels.rf.diversity import (
+    SISO_RECEIVE_DIVERSITY,
+    RFReceiveDiversity,
+)
 from hybrid_v2x_rl.channels.rf.pathloss_37885 import large_scale_loss
 from hybrid_v2x_rl.channels.rf.shadowing import shadowing_db
 from hybrid_v2x_rl.core.enums import FailureCause, RFPropagationState
@@ -92,6 +96,7 @@ class RFPropagationRequest:
     blockage_db: float
     shadowing_normalized: float
     fading_power_gain: float
+    secondary_fading_power_gain: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +111,7 @@ class RFChannelRequest:
     neighbour_count: int
     sensed_fraction: float
     randomness: RFPacketRandomness
+    secondary_fading_power_gain: float | None = None
 
     @property
     def propagation(self) -> RFPropagationRequest:
@@ -117,6 +123,7 @@ class RFChannelRequest:
             blockage_db=self.blockage_db,
             shadowing_normalized=self.shadowing_normalized,
             fading_power_gain=self.fading_power_gain,
+            secondary_fading_power_gain=self.secondary_fading_power_gain,
         )
 
 
@@ -130,6 +137,10 @@ class RFPropagationResult:
     fading_gain_linear: float
     sinr_db: float
     decoding_failure_probability: float
+    receive_antenna_count: int = 1
+    combining_rule: str = "none"
+    branch_fading_power_gains: tuple[float, ...] = ()
+    implementation_loss_db: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +185,13 @@ class NRV2XChannel:
     information_bits: int
     collision: CollisionParameters
     noise_figure_db: float | None = None
+    receive_diversity: RFReceiveDiversity = SISO_RECEIVE_DIVERSITY
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.receive_diversity, RFReceiveDiversity):
+            raise RFChannelError(
+                "receive_diversity must be an RFReceiveDiversity profile"
+            )
 
     @property
     def noise_dbm(self) -> float:
@@ -202,11 +220,18 @@ class NRV2XChannel:
             request.propagation_state,
             loss.shadowing_sigma_db,
         )
+        effective_fading_gain = self.receive_diversity.combined_fading_power(
+            request.fading_power_gain,
+            request.secondary_fading_power_gain,
+        )
+        branch_gains: tuple[float, ...] = (float(request.fading_power_gain),)
+        if request.secondary_fading_power_gain is not None:
+            branch_gains = (*branch_gains, float(request.secondary_fading_power_gain))
         budget = LinkBudget(
             tx_power_dbm=self.tx_power_dbm,
             path_loss_db=loss.total_db,
             shadowing_db=shadow_db,
-            fading_power_gain=request.fading_power_gain,
+            fading_power_gain=effective_fading_gain,
             noise_dbm=self.noise_dbm,
         )
         decoding = block_error_probability(
@@ -216,9 +241,13 @@ class NRV2XChannel:
             propagation_state=request.propagation_state,
             pathloss_db=loss.total_db,
             shadowing_db=shadow_db,
-            fading_gain_linear=request.fading_power_gain,
+            fading_gain_linear=effective_fading_gain,
             sinr_db=budget.snr_db,
             decoding_failure_probability=decoding,
+            receive_antenna_count=self.receive_diversity.antenna_count,
+            combining_rule=self.receive_diversity.combining_rule.value,
+            branch_fading_power_gains=branch_gains,
+            implementation_loss_db=self.receive_diversity.implementation_loss_db,
         )
 
     def evaluate(self, request: RFChannelRequest) -> RFChannelResult:

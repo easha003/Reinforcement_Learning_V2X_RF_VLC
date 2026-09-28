@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.channels.rf.fading import frequency_correlation
+from hybrid_v2x_rl.channels.vlc.model import VLCPacketRandomness
 from hybrid_v2x_rl.config.loader import headline_config_layers, load_config
 from hybrid_v2x_rl.core.enums import RFPropagationState
 from hybrid_v2x_rl.core.geometry import OrientedRectangle, Point
@@ -302,6 +304,59 @@ def test_fading_gains_reach_the_attempts(rollout):
     )
 
 
+def test_explicit_siso_rollout_is_identical_to_the_default(config):
+    tx, rx, fleet = platoon()
+    default = build_rollout(config, buildings=(), root_seed=29)
+    explicit = build_rollout(
+        config,
+        buildings=(),
+        root_seed=29,
+        receive_diversity=RFReceiveDiversity.siso(),
+    )
+
+    assert evaluate(default, tx, rx, fleet) == evaluate(explicit, tx, rx, fleet)
+
+
+def test_two_branch_profile_reaches_population_channel_truth(config):
+    tx, rx, fleet = platoon()
+    profile = RFReceiveDiversity.two_branch_mrc(
+        branch_correlation=math.sqrt(0.03),
+        implementation_loss_db=3.5,
+    )
+    diversity_rollout = build_rollout(
+        config,
+        buildings=(),
+        root_seed=41,
+        receive_diversity=profile,
+    )
+
+    result = diversity_rollout.evaluate_channels(
+        trace_id="trace-a",
+        pair_id="tx>rx",
+        density=20.0,
+        time_s=0.0,
+        transmitter=tx,
+        receiver=rx,
+        neighbours=fleet,
+        index_of_frame=SpatialIndex.build(fleet),
+        vlc_randomness=VLCPacketRandomness(0.5),
+    )
+
+    propagation = result.rf_propagation
+    assert propagation.receive_antenna_count == 2
+    assert propagation.combining_rule == "maximum-ratio-combining"
+    assert len(propagation.branch_fading_power_gains) == 2
+    expected = (
+        propagation.branch_fading_power_gains[0]
+        + math.pow(10.0, -3.5 / 10.0)
+        * propagation.branch_fading_power_gains[1]
+    )
+    assert propagation.fading_gain_linear == pytest.approx(expected)
+    assert diversity_rollout.fading.live_links() == 1
+    outcome, _, _ = evaluate(diversity_rollout, tx, rx, fleet, index=1)
+    assert outcome.rf_quality_db is not None
+
+
 def test_mismatched_fading_gains_are_refused():
     from hybrid_v2x_rl.channels.rf.model import RFPacketRandomness
     from hybrid_v2x_rl.channels.vlc.model import VLCPacketRandomness
@@ -311,6 +366,14 @@ def test_mismatched_fading_gains_are_refused():
             rf_attempts=(RFPacketRandomness(0.5, 0.5, 0.5),) * 3,
             vlc=VLCPacketRandomness(0.5),
             rf_fading_power_gains=(1.0, 1.0),
+        )
+
+    with pytest.raises(PacketError, match="aligned primary gains"):
+        PacketTape(
+            rf_attempts=(RFPacketRandomness(0.5, 0.5, 0.5),) * 3,
+            vlc=VLCPacketRandomness(0.5),
+            rf_fading_power_gains=(1.0, 1.0, 1.0),
+            rf_secondary_fading_power_gains=(1.0, 1.0),
         )
 
 

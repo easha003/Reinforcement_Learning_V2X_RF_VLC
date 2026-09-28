@@ -1,7 +1,7 @@
 # Phase 8 receive-diversity frontier declaration
 
 Status: experiment frozen and structurally validated; physical implementation
-and frontier execution remain blocked
+is complete; frontier execution remains blocked
 
 Date frozen: 2026-09-28
 
@@ -117,15 +117,16 @@ PYTHONPATH=src .venv/bin/python scripts/validate_receive_diversity_frontier.py
 ```
 
 The structural validation resolves ten receive profiles, 18 source physical
-points, two fallback views, and 360 cells. It evaluates zero channel frames,
-does not read the test split, uses no actor or checkpoint, and cannot authorize
-training.
+points, two fallback views, and 360 cells. It instantiates all 180 physical
+profile/point combinations, resolves nine validation windows, evaluates zero
+channel frames, does not read the test split, uses no actor or checkpoint, and
+cannot authorize training.
 
 ## What remains
 
-The declaration alone does not show that `1e-4` is feasible. The next task is
-to implement the keyed correlated second-branch fading and MRC link calculation,
-prove SISO equivalence and the limiting cases in unit tests, and connect the
-new receive profile to the existing certificate-aware evaluator. Only after
-that implementation passes structural and deterministic verification should
-the frozen frontier be executed. PPO remains blocked.
+The declaration alone does not show that `1e-4` is feasible. The keyed
+correlated second-branch fading and MRC calculation are now implemented and
+connected to the pair-local evaluator; see
+`PHASE8_RECEIVE_DIVERSITY_PHYSICAL_MODEL.md`. The next task is the frozen
+propagation-only screen followed by certificate-aware execution for surviving
+profiles. PPO remains blocked.

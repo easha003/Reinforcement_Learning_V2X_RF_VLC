@@ -98,6 +98,10 @@ class PacketTape:
     #: single ``fading_power_gain`` applies to every attempt -- which is a link
     #: with no hopping diversity, not a link with no fading.
     rf_fading_power_gains: tuple[float, ...] = ()
+    #: Optional second receive-branch gain for every RF attempt. Empty is the
+    #: established SISO contract. A two-branch receiver supplies the complete
+    #: aligned sequence so MRC never redraws fading after action selection.
+    rf_secondary_fading_power_gains: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.rf_attempts:
@@ -108,6 +112,18 @@ class PacketTape:
                 context={
                     "attempts": len(self.rf_attempts),
                     "gains": len(self.rf_fading_power_gains),
+                },
+            )
+        if self.rf_secondary_fading_power_gains and (
+            not self.rf_fading_power_gains
+            or len(self.rf_secondary_fading_power_gains) != len(self.rf_attempts)
+        ):
+            raise PacketError(
+                "secondary fading gains require aligned primary gains for every RF attempt",
+                context={
+                    "attempts": len(self.rf_attempts),
+                    "primary_gains": len(self.rf_fading_power_gains),
+                    "secondary_gains": len(self.rf_secondary_fading_power_gains),
                 },
             )
 
@@ -242,6 +258,11 @@ class PacketLifecycle:
                 neighbour_count=request.neighbour_count,
                 sensed_fraction=request.sensed_fraction,
                 randomness=tape.rf_attempts[index],
+                secondary_fading_power_gain=(
+                    tape.rf_secondary_fading_power_gains[index]
+                    if tape.rf_secondary_fading_power_gains
+                    else request.secondary_fading_power_gain
+                ),
             )
             result = self.rf.evaluate(attempt)
             probability *= result.total_failure_probability
@@ -287,6 +308,11 @@ class PacketLifecycle:
                     neighbour_count=request.neighbour_count,
                     sensed_fraction=request.sensed_fraction,
                     randomness=tape.rf_attempts[index],
+                    secondary_fading_power_gain=(
+                        tape.rf_secondary_fading_power_gains[index]
+                        if tape.rf_secondary_fading_power_gains
+                        else request.secondary_fading_power_gain
+                    ),
                 )
             )
         return probability

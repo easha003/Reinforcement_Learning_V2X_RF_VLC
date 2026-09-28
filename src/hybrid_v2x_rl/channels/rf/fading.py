@@ -77,6 +77,10 @@ COHERENCE_TIME_COEFFICIENT = 0.423
 
 GeneratorFactory: TypeAlias = Callable[[str], np.random.Generator]
 
+#: Internal namespace for the independent process used to construct receive
+#: branch two. The NUL prefix cannot collide with ordinary trace pair IDs.
+_RX_BRANCH_TWO_PREFIX = "\x00rx-branch-2:"
+
 
 class FadingError(HybridV2XError):
     """Fading was evaluated with an invalid argument."""
@@ -290,6 +294,44 @@ class FadingProcess:
             raise FadingError("fading correlation matrix is not initialized")
         return cholesky @ white
 
+    def _advance_diffuse(
+        self,
+        key: str,
+        *,
+        elapsed_s: float,
+        tx_speed_mps: float,
+        rx_speed_mps: float,
+    ) -> np.ndarray:
+        """Advance one keyed unit-power diffuse complex process."""
+
+        doppler = doppler_spread_hz(tx_speed_mps, rx_speed_mps, self.carrier_hz)
+        generator = self._generator(key)
+        previous = self._gains.get(key)
+        if previous is None:
+            diffuse = self._draw_innovation(generator)
+        else:
+            rho = temporal_correlation(elapsed_s, doppler)
+            # J0 is oscillatory and goes negative; an AR(1) needs |rho| <= 1 and
+            # a non-negative innovation variance, which holds for any J0 value.
+            diffuse = rho * previous + math.sqrt(
+                max(0.0, 1.0 - rho * rho)
+            ) * self._draw_innovation(generator)
+        self._gains[key] = diffuse
+        return diffuse
+
+    @staticmethod
+    def _power_gains(
+        diffuse: np.ndarray,
+        state: RFPropagationState,
+    ) -> np.ndarray:
+        """Apply the shared configured Rician component and return power."""
+
+        k = rician_k_linear(state)
+        specular = math.sqrt(k / (k + 1.0))
+        scatter = math.sqrt(1.0 / (k + 1.0))
+        envelope = specular + scatter * diffuse
+        return np.abs(envelope) ** 2
+
     def advance(
         self,
         key: str,
@@ -308,32 +350,73 @@ class FadingProcess:
         resetting the diffuse field the link is sitting in.
         """
 
-        doppler = doppler_spread_hz(tx_speed_mps, rx_speed_mps, self.carrier_hz)
-        generator = self._generator(key)
-        previous = self._gains.get(key)
-        if previous is None:
-            diffuse = self._draw_innovation(generator)
-        else:
-            rho = temporal_correlation(elapsed_s, doppler)
-            # J0 is oscillatory and goes negative; an AR(1) needs |rho| <= 1 and
-            # a non-negative innovation variance, which holds for any J0 value.
-            diffuse = rho * previous + math.sqrt(
-                max(0.0, 1.0 - rho * rho)
-            ) * self._draw_innovation(generator)
-        self._gains[key] = diffuse
+        diffuse = self._advance_diffuse(
+            key,
+            elapsed_s=elapsed_s,
+            tx_speed_mps=tx_speed_mps,
+            rx_speed_mps=rx_speed_mps,
+        )
+        return self._power_gains(diffuse, state)
 
-        k = rician_k_linear(state)
-        specular = math.sqrt(k / (k + 1.0))
-        scatter = math.sqrt(1.0 / (k + 1.0))
-        envelope = specular + scatter * diffuse
-        return np.abs(envelope) ** 2
+    def advance_receive_branches(
+        self,
+        key: str,
+        *,
+        elapsed_s: float,
+        tx_speed_mps: float,
+        rx_speed_mps: float,
+        state: RFPropagationState,
+        branch_correlation: float,
+    ) -> np.ndarray:
+        """Return two branch-by-carrier power-gain rows.
+
+        Branch one is the unchanged SISO process. Branch two is formed from
+        that process plus a separately keyed, equally time/frequency-correlated
+        complex process. Thus ``rho=0`` is independent diffuse fading,
+        ``rho=1`` is the identical diffuse limit, and calling this method does
+        not shift any other pair's random stream.
+        """
+
+        if self.generator_factory is None:
+            raise FadingError(
+                "receive diversity requires separately keyed branch generators"
+            )
+        if (
+            not isinstance(branch_correlation, int | float)
+            or isinstance(branch_correlation, bool)
+            or not math.isfinite(float(branch_correlation))
+            or not 0.0 <= float(branch_correlation) <= 1.0
+        ):
+            raise FadingError("branch correlation must be finite and lie in [0, 1]")
+        rho = float(branch_correlation)
+        primary = self._advance_diffuse(
+            key,
+            elapsed_s=elapsed_s,
+            tx_speed_mps=tx_speed_mps,
+            rx_speed_mps=rx_speed_mps,
+        )
+        independent = self._advance_diffuse(
+            _RX_BRANCH_TWO_PREFIX + key,
+            elapsed_s=elapsed_s,
+            tx_speed_mps=tx_speed_mps,
+            rx_speed_mps=rx_speed_mps,
+        )
+        secondary = rho * primary + math.sqrt(max(0.0, 1.0 - rho * rho)) * independent
+        return np.stack(
+            (
+                self._power_gains(primary, state),
+                self._power_gains(secondary, state),
+            )
+        )
 
     def forget(self, key: str) -> None:
         self._gains.pop(key, None)
+        self._gains.pop(_RX_BRANCH_TWO_PREFIX + key, None)
         self._generators.pop(key, None)
+        self._generators.pop(_RX_BRANCH_TWO_PREFIX + key, None)
 
     def live_links(self) -> int:
-        return len(self._gains)
+        return sum(not key.startswith(_RX_BRANCH_TWO_PREFIX) for key in self._gains)
 
 
 __all__ = [

@@ -844,9 +844,16 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
            evaluation cells. Structural validation evaluated zero frames and
            opened no test data. See
            `PHASE8_RECEIVE_DIVERSITY_FRONTIER_DECLARATION.md`.
-         - [ ] Implement the keyed correlated second fading branch and MRC
+         - [x] Implement the keyed correlated second fading branch and MRC
            link calculation, prove SISO equivalence and limiting cases, and
            connect the frozen receive profile to the pair-local evaluator.
+           The primary stream remains bit-exact, only diffuse fading receives
+           a separately keyed branch innovation, all access and large-scale
+           mechanisms remain shared, and the frozen profile now reaches the
+           authoritative deterministic rollout and joint-evaluation boundary.
+           The structural validator instantiates 180 physical combinations
+           without evaluating a frame. See
+           `PHASE8_RECEIVE_DIVERSITY_PHYSICAL_MODEL.md`.
          - [ ] Execute the propagation screen and certificate-aware frontier,
            retain every candidate/lower-bound gap, and apply the frozen
            headline-profile authorization rule before any new PPO seed.
@@ -1174,8 +1181,7 @@ joint space. Larger frames publish a realizable candidate, a certified
 zero-contention lower bound, and the remaining optimality gap. The bounded
 pair-local frontier and RF-scaling diagnosis are now complete, and the
 full-carrier allocation correction plus receive-diversity experiment
-declaration are frozen. The immediate next task is to implement and verify the
-keyed correlated second RF fading branch and MRC calculation, then connect that
-physical profile to the existing certificate-aware evaluator. No PPO training
-is authorized until the predeclared receive-diversity gate yields a feasible
-headline design.
+declaration and physical model are frozen. The immediate next task is to run
+the predeclared propagation-only screen and then the certificate-aware joint
+frontier for every surviving receive profile. No PPO training is authorized
+until the receive-diversity gate yields a feasible headline design.

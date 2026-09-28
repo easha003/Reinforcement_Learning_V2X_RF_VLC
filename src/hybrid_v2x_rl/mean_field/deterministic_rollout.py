@@ -26,6 +26,7 @@ from typing import Final, Protocol, cast
 import numpy as np
 
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
@@ -491,6 +492,7 @@ def run_policy_rollout_with_state(
     frame_observer: PopulationRolloutObserver | None = None,
     sensitivity_band: SensitivityBand = SensitivityBand.NOMINAL,
     collision_subchannels: int | None = None,
+    receive_diversity: RFReceiveDiversity | None = None,
     oracle_controls_unusable_rows: bool = False,
 ) -> PolicyRolloutResult:
     """Run any population policy through the one authoritative environment path.
@@ -537,6 +539,12 @@ def run_policy_rollout_with_state(
         raise DeterministicRolloutError(
             "collision_subchannels must be a positive integer or None"
         )
+    if receive_diversity is not None and not isinstance(
+        receive_diversity, RFReceiveDiversity
+    ):
+        raise DeterministicRolloutError(
+            "receive_diversity must be an RFReceiveDiversity profile or None"
+        )
     if type(oracle_controls_unusable_rows) is not bool:
         raise DeterministicRolloutError(
             "oracle_controls_unusable_rows must be boolean"
@@ -573,6 +581,7 @@ def run_policy_rollout_with_state(
         root_seed=seed_state.active_root_seed,
         band=sensitivity_band,
         collision_subchannels=collision_subchannels,
+        receive_diversity=receive_diversity,
     )
     reader = PopulationFrameReader(
         source,
@@ -602,21 +611,21 @@ def run_policy_rollout_with_state(
 
     digest = hashlib.sha256()
     tape_digest = hashlib.sha256()
-    _fingerprint_update(
-        digest,
-        {
-            "schema": _POLICY_STREAM,
-            "trace_id": source.trace_id,
-            "policy": canonical_policy,
-            "environment_seed": seed_state.active_root_seed,
-            "policy_seed": policy_seed,
-            "start_frame_index": start_frame_index,
-            "max_frames": max_frames,
-            "sensitivity_band": sensitivity_band.value,
-            "collision_subchannels": collision_subchannels,
-            "oracle_controls_unusable_rows": oracle_controls_unusable_rows,
-        },
-    )
+    policy_identity: dict[str, object] = {
+        "schema": _POLICY_STREAM,
+        "trace_id": source.trace_id,
+        "policy": canonical_policy,
+        "environment_seed": seed_state.active_root_seed,
+        "policy_seed": policy_seed,
+        "start_frame_index": start_frame_index,
+        "max_frames": max_frames,
+        "sensitivity_band": sensitivity_band.value,
+        "collision_subchannels": collision_subchannels,
+        "oracle_controls_unusable_rows": oracle_controls_unusable_rows,
+    }
+    if receive_diversity is not None:
+        policy_identity["receive_diversity"] = receive_diversity.as_dict()
+    _fingerprint_update(digest, policy_identity)
     _fingerprint_update(
         tape_digest,
         {

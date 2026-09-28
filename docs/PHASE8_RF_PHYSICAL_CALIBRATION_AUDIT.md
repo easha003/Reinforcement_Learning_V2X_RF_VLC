@@ -132,6 +132,6 @@ The minimal defensible path is:
    traces, state-regime audits, and the abstract zero-contention RF-scaling
    diagnostic do not need to be regenerated.
 
-No physical parameter was changed by this audit. Items 1--3 are now frozen.
-The next task is to implement and verify the declared second-branch fading and
-MRC calculation before item 4 is executed.
+No physical parameter was changed by this audit. Items 1--3 and the declared
+second-branch/MRC implementation are now frozen. The next task is item 4: run
+the propagation screen and then only the affected certificate-aware frontier.

@@ -37,7 +37,15 @@ def main() -> int:
         project_root=args.project_root,
         verify_evidence=not args.skip_evidence_verification,
     )
-    print(json.dumps(structural_receive_diversity_dry_run(declaration), indent=2))
+    print(
+        json.dumps(
+            structural_receive_diversity_dry_run(
+                declaration,
+                project_root=args.project_root,
+            ),
+            indent=2,
+        )
+    )
     return 0
 
 

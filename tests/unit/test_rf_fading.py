@@ -27,6 +27,7 @@ from hybrid_v2x_rl.channels.rf.fading import (
     wavelength_m,
 )
 from hybrid_v2x_rl.core.enums import RFPropagationState
+from hybrid_v2x_rl.core.randomness import make_generator
 
 CARRIER_HZ = 5.9e9
 #: Adjacent full 10 MHz carrier-allocation centres in a wider system pool.
@@ -38,6 +39,22 @@ def fading(seed: int = 7, subchannels: tuple[float, ...] = SUBCHANNELS_HZ) -> Fa
         rng=np.random.default_rng(seed),
         carrier_hz=CARRIER_HZ,
         subchannel_separations_hz=subchannels,
+    )
+
+
+def keyed_fading(
+    seed: int = 7,
+    subchannels: tuple[float, ...] = SUBCHANNELS_HZ,
+) -> FadingProcess:
+    return FadingProcess(
+        rng=None,
+        carrier_hz=CARRIER_HZ,
+        subchannel_separations_hz=subchannels,
+        generator_factory=lambda key: make_generator(
+            seed,
+            "rf-receive-diversity-test",
+            episode_id=key,
+        ),
     )
 
 
@@ -301,3 +318,80 @@ def test_forgetting_a_link_releases_its_state() -> None:
     assert process.live_links() == 1
     process.forget("pair")
     assert process.live_links() == 0
+
+
+# -- receive-branch correlation ----------------------------------------------
+
+
+def test_two_branch_advance_preserves_the_primary_siso_process_bit_exactly() -> None:
+    siso = keyed_fading(seed=91)
+    diversity = keyed_fading(seed=91)
+
+    for _ in range(8):
+        expected = siso.advance(
+            "pair",
+            elapsed_s=0.5e-3,
+            tx_speed_mps=7.0,
+            rx_speed_mps=6.0,
+            state=RFPropagationState.NLOS,
+        )
+        branches = diversity.advance_receive_branches(
+            "pair",
+            elapsed_s=0.5e-3,
+            tx_speed_mps=7.0,
+            rx_speed_mps=6.0,
+            state=RFPropagationState.NLOS,
+            branch_correlation=0.17320508075688773,
+        )
+        assert np.array_equal(branches[0], expected)
+
+
+def test_receive_branch_power_correlation_matches_the_declared_ecc_proxy() -> None:
+    process = keyed_fading(seed=117, subchannels=(0.0,))
+    rho = math.sqrt(0.03)
+    powers = np.array(
+        [
+            process.advance_receive_branches(
+                f"pair-{index}",
+                elapsed_s=1.0,
+                tx_speed_mps=10.0,
+                rx_speed_mps=10.0,
+                state=RFPropagationState.NLOS,
+                branch_correlation=rho,
+            )[:, 0]
+            for index in range(12000)
+        ]
+    )
+
+    measured = float(np.corrcoef(powers[:, 0], powers[:, 1])[0, 1])
+    assert measured == pytest.approx(0.03, abs=0.025)
+
+
+def test_perfect_diffuse_correlation_is_the_identical_branch_limit() -> None:
+    process = keyed_fading(seed=31)
+
+    branches = process.advance_receive_branches(
+        "pair",
+        elapsed_s=1e-3,
+        tx_speed_mps=5.0,
+        rx_speed_mps=5.0,
+        state=RFPropagationState.LOS,
+        branch_correlation=1.0,
+    )
+
+    assert np.array_equal(branches[0], branches[1])
+    assert process.live_links() == 1
+    process.forget("pair")
+    assert process.live_links() == 0
+
+
+def test_receive_diversity_refuses_an_unkeyed_shared_rng() -> None:
+    with pytest.raises(FadingError, match="separately keyed"):
+        fading().advance_receive_branches(
+            "pair",
+            elapsed_s=1e-3,
+            tx_speed_mps=5.0,
+            rx_speed_mps=5.0,
+            state=RFPropagationState.NLOS,
+            branch_correlation=0.0,
+        )
