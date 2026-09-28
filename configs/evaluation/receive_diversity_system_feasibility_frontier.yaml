@@ -1,0 +1,99 @@
+schema: "hybrid-rf-vlc-rl.receive-diversity-frontier-declaration.v1"
+frozen_date: "2026-09-28"
+
+objective:
+  miss_budget: 0.0001
+  densities_vehicles_per_lane_km: [10.0, 20.0, 30.0]
+  required_split: "validation"
+  test_split_opened: false
+  interpretation: "literature-bounded synthetic receive-diversity feasibility frontier, not field-validation evidence"
+
+evidence:
+  source_system_frontier:
+    path: "configs/evaluation/full_carrier_system_feasibility_frontier.yaml"
+    sha256: "60718bcdead081ad77b794ef64daadb054fb8c0fa2f052fbe4334f67a82d99c7"
+  actor_used: false
+  checkpoint_used: false
+  calibration_sources:
+    - id: "abbas-karedal-tufvesson-2013"
+      url: "https://doi.org/10.1109/LAWP.2013.2250243"
+      role: "5.6-GHz two-vehicle measurement anchor for complementary antenna placement, SC/MRC benefit, and cable-loss sensitivity"
+    - id: "sathyanarayanan-et-al-2026"
+      url: "https://doi.org/10.1038/s41598-026-44515-3"
+      role: "5.9-GHz fabricated antenna anchor for the low-correlation hardware boundary; not an on-road branch-correlation measurement"
+
+receive_diversity:
+  control:
+    name: "rx1-siso-control"
+    antenna_count: 1
+    combining_rule: "none"
+    headline: false
+    authorizes_training: false
+  intervention:
+    antenna_count: 2
+    combining_rule: "maximum-ratio-combining"
+    channel_state_information: "perfect-per-attempt"
+    combined_snr_rule: "gamma_mrc = gamma_1 + 10^(-implementation_loss_db/10) * gamma_2"
+    branch_generation_rule: "h_2 = rho*h_1 + sqrt(1-rho^2)*z_2 for diffuse unit-power complex innovations, preserving configured Rician power normalization"
+    branch_power_normalization: "each pre-loss branch has the same unit mean small-scale power as the existing SISO branch; no antenna-gain bonus is added"
+    receiver_noise: "independent equal-variance noise across receive chains"
+    correlation_parameter: "magnitude of correlation between unit-power diffuse complex branch innovations"
+    ecc_relation: "antenna far-field ECC is used as the proxy branch_correlation^2 under the declared equal-power isotropic approximation"
+    shared_mechanisms:
+      - "large-scale path loss"
+      - "propagation state and vehicle blockage"
+      - "lognormal shadowing"
+      - "configured Rician specular component"
+      - "RF contention"
+      - "receiver half-duplex exposure"
+    independently_innovated_mechanism: "small-scale fading on the second receive branch"
+  branch_correlation:
+    levels:
+      - name: "independent-ideal"
+        coefficient: 0.0
+        headline: false
+        evidence_role: "optimistic mathematical boundary"
+      - name: "low-correlation-hardware-bound"
+        coefficient: 0.17320508075688773
+        headline: true
+        evidence_role: "conservative conversion sqrt(0.03) of the reported far-field ECC < 0.03; hardware anchor only"
+      - name: "correlated-stress"
+        coefficient: 0.7
+        headline: false
+        evidence_role: "adverse declared sensitivity, not a fitted on-road coefficient"
+  implementation_loss:
+    application: "attenuation on the secondary receive branch before MRC"
+    levels:
+      - name: "integrated-zero-loss"
+        loss_db: 0.0
+        headline: false
+        evidence_role: "optimistic local-processing boundary"
+      - name: "short-cable-loss"
+        loss_db: 3.5
+        headline: true
+        evidence_role: "lower end of the reported 3.5-7 dB loss for 2-4 m vehicle RF cabling"
+      - name: "long-cable-loss"
+        loss_db: 7.0
+        headline: false
+        evidence_role: "upper end of the reported 3.5-7 dB loss for 2-4 m vehicle RF cabling"
+
+execution:
+  expansion: "SISO control plus Cartesian product of two-branch correlation and implementation-loss levels"
+  stage_order:
+    - "propagation-only necessary-condition screen"
+    - "certificate-aware pair-local joint feasibility for every surviving predeclared profile"
+  screening_rule: "a profile may be removed only when its optimistic propagation lower bound exceeds the miss budget; no observed result may add or alter a profile"
+  expected_receive_profiles: 10
+  expected_source_physical_points: 18
+  expected_source_fallback_views: 2
+  expected_evaluation_cells_before_screening: 360
+  no_adaptive_axis_expansion: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_receive_diversity_system_feasibility_frontier.json"
+
+decision:
+  headline_receive_profile: "rx2-mrc__low-correlation-hardware-bound__short-cable-loss"
+  training_authorization: "headline receive profile must have feasible contract cells at every density and every sensing band for one predeclared RF-capacity/optical configuration"
+  sensitivity_interpretation: "ideal and stressed profiles bound model dependence but cannot individually authorize training"
+  claim_boundary: "any passing result is conditional synthetic evidence; it is not a measured on-road reliability guarantee"

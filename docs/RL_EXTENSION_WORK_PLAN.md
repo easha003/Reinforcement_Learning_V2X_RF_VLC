@@ -832,11 +832,24 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          diversity. The corrected 36-cell declaration passed its structural
          dry run without evaluating frames. See
          `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`.
-       - [ ] Predeclare a calibrated independent receive-diversity frontier
-         with explicit antenna count, combining rule, branch-correlation and
-         implementation-loss sensitivity. Re-run only the affected
-         certificate-aware feasibility evidence; mobility traces and completed
-         state audits remain reusable.
+       - [ ] Complete the calibrated independent receive-diversity frontier
+         and re-run only the affected certificate-aware feasibility evidence;
+         mobility traces and completed state audits remain reusable.
+         - [x] Freeze a literature-bounded SISO control plus two-branch MRC
+           declaration with explicit antenna count, perfect-CSI assumption,
+           complex branch-correlation sensitivity, secondary-chain loss
+           sensitivity, shared-failure boundary, staged screening rule, and
+           conditional claim boundary. The corrected 1/2/4 full-carrier
+           source produces ten receive profiles and at most 360 predeclared
+           evaluation cells. Structural validation evaluated zero frames and
+           opened no test data. See
+           `PHASE8_RECEIVE_DIVERSITY_FRONTIER_DECLARATION.md`.
+         - [ ] Implement the keyed correlated second fading branch and MRC
+           link calculation, prove SISO equivalence and limiting cases, and
+           connect the frozen receive profile to the pair-local evaluator.
+         - [ ] Execute the propagation screen and certificate-aware frontier,
+           retain every candidate/lower-bound gap, and apply the frozen
+           headline-profile authorization rule before any new PPO seed.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1158,7 +1171,11 @@ tests and archived analyses; it is no longer in the live rollout path. Because
 overlapping local domains destroy the former scalar-load separability, the
 corrected feasibility evaluator is exact only when it exhausts the declared
 joint space. Larger frames publish a realizable candidate, a certified
-zero-contention lower bound, and the remaining optimality gap. The immediate
-next task is to predeclare and execute the bounded pair-local system-feasibility
-frontier; no PPO training is authorized until that gate yields a feasible
-candidate or a scientifically justified system revision.
+zero-contention lower bound, and the remaining optimality gap. The bounded
+pair-local frontier and RF-scaling diagnosis are now complete, and the
+full-carrier allocation correction plus receive-diversity experiment
+declaration are frozen. The immediate next task is to implement and verify the
+keyed correlated second RF fading branch and MRC calculation, then connect that
+physical profile to the existing certificate-aware evaluator. No PPO training
+is authorized until the predeclared receive-diversity gate yields a feasible
+headline design.

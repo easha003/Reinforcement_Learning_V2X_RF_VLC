@@ -1,8 +1,10 @@
 # Phase 8 RF physical-calibration audit
 
 Status: mismatch diagnosis complete; allocation finding corrected and
-superseded by `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`; receive-diversity
-calibration remains blocked
+superseded by `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`; the literature-
+bounded receive-diversity experiment is now frozen in
+`PHASE8_RECEIVE_DIVERSITY_FRONTIER_DECLARATION.md`, with implementation and
+execution still blocked
 
 Date frozen: 2026-09-28
 
@@ -124,10 +126,12 @@ The minimal defensible path is:
    results but not those bandwidth labels.
 3. Predeclare an independent receive-diversity frontier with explicit antenna
    count, combining rule, gain/correlation assumptions, and sensitivity bands.
+   This declaration is now complete; it is literature-bounded synthetic
+   calibration, not on-road field validation.
 4. Re-run only the affected certificate-aware feasibility frontier. Mobility
    traces, state-regime audits, and the abstract zero-contention RF-scaling
    diagnostic do not need to be regenerated.
 
-No physical parameter is changed by this audit. The next task is to implement
-and freeze item 1 and its corrected capacity mapping before designing the
-receive-diversity frontier.
+No physical parameter was changed by this audit. Items 1--3 are now frozen.
+The next task is to implement and verify the declared second-branch fading and
+MRC calculation before item 4 is executed.

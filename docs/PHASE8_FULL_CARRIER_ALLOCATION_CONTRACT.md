@@ -99,8 +99,10 @@ This task changes collision capacity and attempt-frequency correlation. It
 does not regenerate mobility traces, alter the RF link budget, execute the
 corrected frontier, train PPO, or open the test split.
 
-The next task is to predeclare a receive-diversity frontier with explicit
-antenna count, combining rule, branch correlation, implementation loss, and
-sensitivity bands. The corrected 1/2/4 full-carrier capacity levels will form
-its resource axis. Only after that declaration is frozen should the affected
-certificate-aware frontier be executed.
+The receive-diversity experiment is now frozen in
+`PHASE8_RECEIVE_DIVERSITY_FRONTIER_DECLARATION.md`. It explicitly declares the
+antenna count, combining and channel-state-information assumptions, branch
+correlation, secondary-chain implementation loss, and sensitivity bands over
+this corrected 1/2/4 full-carrier resource axis. The next task is to implement
+and verify that physical branch/combiner model before executing any affected
+certificate-aware frontier cell.
