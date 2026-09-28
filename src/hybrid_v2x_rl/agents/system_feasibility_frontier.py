@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Final, Literal, cast
 
 from hybrid_v2x_rl.channels.rf.collision import SensitivityBand, headline_parameters
+from hybrid_v2x_rl.config.hashing import scope_hash as config_scope_hash
 from hybrid_v2x_rl.config.loader import load_config, load_yaml_file
 from hybrid_v2x_rl.core.errors import HybridV2XError
 
@@ -193,6 +194,8 @@ class SystemFeasibilityFrontierDeclaration:
     environment_seed: int
     window_source: Path
     window_source_sha256: str
+    validation_windows_per_density: int
+    frames_per_window: int
     baseline_policy_environment_scope_hash: str
     base_config_layers: tuple[Path, ...]
     selection_window_slots: int
@@ -675,10 +678,22 @@ def load_system_feasibility_frontier_declaration(
         name="environment seed",
         minimum=0,
     )
-    scope_hash = _digest(
+    baseline_scope_hash = _digest(
         evidence["baseline_policy_environment_scope_hash"],
         name="baseline policy-environment scope hash",
     )
+    actual_baseline_scope_hash = config_scope_hash(
+        base_config,
+        "policy_environment",
+    )
+    if actual_baseline_scope_hash != baseline_scope_hash:
+        raise SystemFeasibilityFrontierError(
+            "base configuration policy-environment scope has drifted",
+            context={
+                "actual": actual_baseline_scope_hash,
+                "expected": baseline_scope_hash,
+            },
+        )
     if (
         _boolean(evidence["actor_used"], name="actor-used flag")
         or _boolean(evidence["checkpoint_used"], name="checkpoint-used flag")
@@ -720,7 +735,7 @@ def load_system_feasibility_frontier_declaration(
             expected_sha256=window_sha256,
             expected_schema=window_schema,
             environment_seed=environment_seed,
-            policy_environment_scope_hash=scope_hash,
+            policy_environment_scope_hash=baseline_scope_hash,
             densities=densities,
             windows_per_density=windows_per_density,
             frames_per_window=frames_per_window,
@@ -792,7 +807,9 @@ def load_system_feasibility_frontier_declaration(
         environment_seed=environment_seed,
         window_source=window_path,
         window_source_sha256=window_sha256,
-        baseline_policy_environment_scope_hash=scope_hash,
+        validation_windows_per_density=windows_per_density,
+        frames_per_window=frames_per_window,
+        baseline_policy_environment_scope_hash=baseline_scope_hash,
         base_config_layers=base_layers,
         selection_window_slots=slots,
         rf_capacities=capacities,

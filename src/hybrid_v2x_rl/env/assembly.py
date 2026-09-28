@@ -16,6 +16,7 @@ configuration field, it is a parameter that escaped the provenance table.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -44,6 +45,7 @@ def build_rf_channel(
     *,
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
+    collision_subchannels: int | None = None,
 ) -> NRV2XChannel:
     """The radio façade for this profile.
 
@@ -57,25 +59,34 @@ def build_rf_channel(
 
     bits_per_element = BITS_PER_RESOURCE_ELEMENT[config.rf.modulation]
     channel_uses = int(config.rf.available_coded_bits() / bits_per_element)
+    collision = headline_parameters(
+        band or SensitivityBand.NOMINAL,
+        # What this profile actually commits per packet, not a default.
+        committed_airtime_s=config.rf.timing.airtime_s
+        * config.service.rf_attempts_per_packet,
+        # One means every packet puts a copy on the radio, which is what a
+        # single-medium profile does. Below one the radio is carrying only
+        # part of the offered traffic because the rest went by light, and the
+        # contention, the half-duplex term and the pool claim all fall
+        # together. A caller scoring an allocation has to build the channel
+        # that allocation produces, not the one it started from.
+        rf_usage_fraction=rf_usage_fraction,
+    )
+    if collision_subchannels is not None:
+        if (
+            not isinstance(collision_subchannels, int)
+            or isinstance(collision_subchannels, bool)
+            or collision_subchannels < 1
+        ):
+            raise ValueError("collision_subchannels must be a positive integer")
+        collision = replace(collision, subchannels=collision_subchannels)
     return NRV2XChannel(
         carrier_hz=config.rf.carrier_hz,
         bandwidth_hz=config.rf.bandwidth_hz,
         tx_power_dbm=config.rf.tx_power_dbm,
         blocklength=channel_uses,
         information_bits=(config.service.payload_bytes + config.rf.timing.framing_overhead_bytes) * 8,
-        collision=headline_parameters(
-            band or SensitivityBand.NOMINAL,
-            # What this profile actually commits per packet, not a default.
-            committed_airtime_s=config.rf.timing.airtime_s
-            * config.service.rf_attempts_per_packet,
-            # One means every packet puts a copy on the radio, which is what a
-            # single-medium profile does. Below one the radio is carrying only
-            # part of the offered traffic because the rest went by light, and
-            # the contention, the half-duplex term and the pool claim all fall
-            # together. A caller scoring an allocation has to build the channel
-            # that allocation produces, not the one it started from.
-            rf_usage_fraction=rf_usage_fraction,
-        ),
+        collision=collision,
     )
 
 
@@ -127,11 +138,17 @@ def build_lifecycle(
     *,
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
+    collision_subchannels: int | None = None,
 ) -> PacketLifecycle:
     """Both façades and the deadline, assembled and checked for feasibility."""
 
     return PacketLifecycle(
-        rf=build_rf_channel(config, band=band, rf_usage_fraction=rf_usage_fraction),
+        rf=build_rf_channel(
+            config,
+            band=band,
+            rf_usage_fraction=rf_usage_fraction,
+            collision_subchannels=collision_subchannels,
+        ),
         vlc=build_vlc_channel(config),
         timing=build_timing(config),
     )
@@ -144,6 +161,7 @@ def build_rollout(
     root_seed: int = 0,
     band: SensitivityBand | None = None,
     rf_usage_fraction: float = 1.0,
+    collision_subchannels: int | None = None,
 ) -> Rollout:
     """A rollout wired to this profile, including the receiver's acceptance cone.
 
@@ -155,7 +173,10 @@ def build_rollout(
 
     return Rollout(
         lifecycle=build_lifecycle(
-            config, band=band, rf_usage_fraction=rf_usage_fraction
+            config,
+            band=band,
+            rf_usage_fraction=rf_usage_fraction,
+            collision_subchannels=collision_subchannels,
         ),
         buildings=tuple(buildings),
         root_seed=root_seed,

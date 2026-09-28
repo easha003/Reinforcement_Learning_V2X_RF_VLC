@@ -21,6 +21,7 @@ from hybrid_v2x_rl.agents.regime_evaluation import (
     EvaluationWindow,
     load_frozen_regime_audit,
 )
+from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
 from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
 from hybrid_v2x_rl.core.errors import HybridV2XError
@@ -30,6 +31,8 @@ from hybrid_v2x_rl.mean_field.environment_api import FrameObservation
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, TraceCatalog
 from hybrid_v2x_rl.mean_field.joint_risk_oracle import (
     JOINT_RISK_ORACLE_METHOD,
+    MAX_EXACT_JOINT_ASSIGNMENTS,
+    MAX_SEARCH_ITERATIONS,
     JointRiskOracleProblem,
     JointRiskOracleSolution,
     solve_pair_local_joint_risk,
@@ -248,6 +251,9 @@ class _JointOraclePolicy:
     tallies: dict[float, _JointOracleTally] = field(default_factory=dict)
     name: str = "pair-local-population-joint-risk-search"
     requires_oracle_truth: bool = True
+    exact_assignment_cap: int = MAX_EXACT_JOINT_ASSIGNMENTS
+    max_search_iterations: int = MAX_SEARCH_ITERATIONS
+    oracle_controls_unusable_rows: bool = False
     _pending: dict[int, JointRiskOracleSolution] = field(default_factory=dict, init=False)
     _empty_pending: set[int] = field(default_factory=set, init=False)
 
@@ -269,12 +275,25 @@ class _JointOraclePolicy:
         if decision.population_size == 0:
             self._empty_pending.add(decision.frame.index)
             return ()
+        usable_mask = (
+            tuple(True for _ in decision.actor_frame.rows)
+            if self.oracle_controls_unusable_rows
+            else None
+        )
         solution = solve_pair_local_joint_risk(
-            JointRiskOracleProblem.from_decision(decision, channel_truth)
+            JointRiskOracleProblem.from_decision(
+                decision,
+                channel_truth,
+                usable_mask=usable_mask,
+                exact_assignment_cap=self.exact_assignment_cap,
+                max_search_iterations=self.max_search_iterations,
+            )
         )
         self._pending[decision.frame.index] = solution
         return tuple(
-            action if actor_row.usable else None
+            action
+            if actor_row.usable or self.oracle_controls_unusable_rows
+            else None
             for action, actor_row in zip(
                 solution.actions,
                 decision.actor_frame.rows,
@@ -443,6 +462,14 @@ class JointOracleEvaluationReport:
         return target
 
 
+@dataclass(frozen=True, slots=True)
+class JointOracleWindowEvaluation:
+    """Aggregated candidate and certificate rows for one frontier cell."""
+
+    densities: tuple[dict[str, object], ...]
+    campaign: dict[str, object]
+
+
 def _numpy_state_equal(left: object, right: object) -> bool:
     if not isinstance(left, tuple) or not isinstance(right, tuple):
         return False
@@ -453,6 +480,117 @@ def _numpy_state_equal(left: object, right: object) -> bool:
         and isinstance(right[1], np.ndarray)
         and np.array_equal(left[1], right[1])
         and left[2:] == right[2:]
+    )
+
+
+def evaluate_pair_local_joint_windows(
+    config: ProjectConfig,
+    *,
+    windows: tuple[EvaluationWindow, ...],
+    environment_seed: int,
+    normalization_state: ObservationNormalizationState,
+    sensitivity_band: SensitivityBand,
+    collision_subchannels: int,
+    oracle_controls_unusable_rows: bool,
+    exact_assignment_cap: int,
+    max_search_iterations: int,
+) -> JointOracleWindowEvaluation:
+    """Evaluate one predeclared physical/fallback cell on frozen windows."""
+
+    if not isinstance(config, ProjectConfig):
+        raise JointOracleEvaluationError("joint window evaluation requires ProjectConfig")
+    if not windows or any(not isinstance(window, EvaluationWindow) for window in windows):
+        raise JointOracleEvaluationError(
+            "joint window evaluation requires frozen evaluation windows"
+        )
+    if any(window.density <= 0.0 for window in windows):  # pragma: no cover - dataclass
+        raise JointOracleEvaluationError("joint window densities must be positive")
+    if not isinstance(normalization_state, ObservationNormalizationState) or not (
+        normalization_state.frozen
+    ):
+        raise JointOracleEvaluationError(
+            "joint window evaluation requires a frozen normalization state"
+        )
+    if not isinstance(sensitivity_band, SensitivityBand):
+        raise JointOracleEvaluationError(
+            "joint window evaluation requires a declared sensing band"
+        )
+    if type(oracle_controls_unusable_rows) is not bool:
+        raise JointOracleEvaluationError(
+            "oracle_controls_unusable_rows must be boolean"
+        )
+
+    python_rng = random.getstate()
+    numpy_rng = np.random.get_state()
+    torch_rng = torch.random.get_rng_state().clone()
+    policy = _JointOraclePolicy(
+        exact_assignment_cap=exact_assignment_cap,
+        max_search_iterations=max_search_iterations,
+        oracle_controls_unusable_rows=oracle_controls_unusable_rows,
+    )
+    catalog = TraceCatalog.from_splits(config.paths.trace_root, config.environment.splits)
+    validation_sources = {
+        source.trace_id: source for source in catalog.for_split("validation")
+    }
+    for window in windows:
+        try:
+            source = validation_sources[window.trace_id]
+        except KeyError as error:
+            raise JointOracleEvaluationError(
+                "frontier validation window is absent from the configured catalog"
+            ) from error
+        if source.density != window.density:
+            raise JointOracleEvaluationError(
+                "frontier window density differs from trace catalog"
+            )
+        result = run_policy_rollout_with_state(
+            config,
+            source,
+            policy=policy,
+            environment_seed=environment_seed,
+            policy_seed=0,
+            start_frame_index=window.start_frame_index,
+            max_frames=window.frames,
+            normalization_state=normalization_state,
+            frame_observer=policy,
+            sensitivity_band=sensitivity_band,
+            collision_subchannels=collision_subchannels,
+            oracle_controls_unusable_rows=oracle_controls_unusable_rows,
+        )
+        if result.normalization_state != normalization_state:
+            raise JointOracleEvaluationError(
+                "frozen frontier normalization state changed"
+            )
+    policy.assert_complete()
+    if (
+        random.getstate() != python_rng
+        or not _numpy_state_equal(np.random.get_state(), numpy_rng)
+        or not torch.equal(torch.random.get_rng_state(), torch_rng)
+    ):
+        raise JointOracleEvaluationError(
+            "joint window evaluation mutated global RNG state"
+        )
+    expected_densities = tuple(sorted(set(window.density for window in windows)))
+    if set(policy.tallies) != set(expected_densities):
+        raise JointOracleEvaluationError(
+            "joint window evaluation density coverage is incomplete"
+        )
+    density_rows = tuple(
+        policy.tallies[density].as_dict(
+            density=density,
+            miss_budget=config.service.miss_budget,
+        )
+        for density in expected_densities
+    )
+    campaign_tally = _JointOracleTally()
+    for density in expected_densities:
+        campaign_tally.merge(policy.tallies[density])
+    return JointOracleWindowEvaluation(
+        densities=density_rows,
+        campaign=campaign_tally.as_dict(
+            density=None,
+            miss_budget=config.service.miss_budget,
+        ),
     )
 
 
@@ -557,5 +695,7 @@ __all__ = [
     "JOINT_ORACLE_EVALUATION_SCHEMA",
     "JointOracleEvaluationError",
     "JointOracleEvaluationReport",
+    "JointOracleWindowEvaluation",
     "build_joint_oracle_evaluation",
+    "evaluate_pair_local_joint_windows",
 ]

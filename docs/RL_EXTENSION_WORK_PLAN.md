@@ -777,8 +777,12 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        Pareto-minimal change rule before observing any frontier result. The
        declaration is fail-closed and no learner, checkpoint, or test trace is
        used. See `PHASE8_PAIR_LOCAL_SYSTEM_FEASIBILITY_FRONTIER.md`.
-     - [ ] Implement the versioned frontier executor and result-artifact
+     - [x] Implement the versioned frontier executor and result-artifact
        contract, then pass a structural dry run without opening the test split.
+       The artifact-backed dry run resolved all nine windows, both optical
+       configurations, every effective RF capacity/sensing combination, and
+       exactly 36 ordered cells without evaluating a channel frame. Execution
+       is opt-in through `--execute`; the default CLI remains dry-run only.
      - [ ] Execute all 36 predeclared evaluation cells, retain every open
        candidate/lower-bound gap, and apply the frozen training-authorization
        rule before starting any new policy seed.

@@ -154,6 +154,7 @@ class JointRiskOracleProblem:
         decision: PopulationPolicyFrame,
         channel_truth: OracleChannelTruth,
         *,
+        usable_mask: tuple[bool, ...] | None = None,
         exact_assignment_cap: int = MAX_EXACT_JOINT_ASSIGNMENTS,
         max_search_iterations: int = MAX_SEARCH_ITERATIONS,
     ) -> JointRiskOracleProblem:
@@ -166,10 +167,15 @@ class JointRiskOracleProblem:
             raise JointRiskOracleError(
                 "channel truth must cover the population exactly"
             )
+        effective_usable_mask = (
+            decision.actor_frame.usable_mask
+            if usable_mask is None
+            else usable_mask
+        )
         return cls(
             frame=decision.frame,
             context=decision.local_rf_context,
-            usable_mask=decision.actor_frame.usable_mask,
+            usable_mask=effective_usable_mask,
             allowed_actions=decision.action_space.mask.allowed_actions,
             fallback_action=decision.action_space.fallback_action,
             resource_map=decision.resource_map,

@@ -139,6 +139,20 @@ def test_sensing_band_values_cannot_drift(tmp_path: Path) -> None:
         )
 
 
+def test_baseline_policy_environment_scope_cannot_drift(tmp_path: Path) -> None:
+    payload = _payload()
+    evidence = payload["evidence"]
+    assert isinstance(evidence, dict)
+    evidence["baseline_policy_environment_scope_hash"] = "c" * 64
+
+    with pytest.raises(SystemFeasibilityFrontierError, match="scope has drifted"):
+        load_system_feasibility_frontier_declaration(
+            _write_declaration(tmp_path, payload),
+            project_root=PROJECT_ROOT,
+            verify_evidence=False,
+        )
+
+
 def test_diagnostic_fallback_cannot_authorize_training(tmp_path: Path) -> None:
     payload = _payload()
     axes = payload["axes"]

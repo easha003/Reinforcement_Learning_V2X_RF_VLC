@@ -132,6 +132,23 @@ def _truth(frame: PopulationFrame) -> dict[str, RFPropagationResult]:
     return {pair_id: _propagation(0.1) for pair_id in frame.active_pair_ids}
 
 
+def test_frontier_capacity_and_sensing_overrides_are_explicit() -> None:
+    config = load_headline_config(PROJECT_ROOT)
+
+    model = LocalRFPhysicsModel.from_config(
+        config,
+        sensitivity_band=SensitivityBand.PESSIMISTIC,
+        collision_subchannels=8,
+    )
+
+    parameters = model.response_model.parameters
+    assert parameters.subchannels == 8
+    assert parameters.selection_window_slots == 200
+    assert parameters.candidate_resources == 1600
+    assert parameters.sensing_reliability == pytest.approx(0.70)
+    assert model.response_model.sensitivity_band is SensitivityBand.PESSIMISTIC
+
+
 def test_pipeline_assembles_one_identity_preserving_local_rf_state() -> None:
     frame = _frame((("pair-a", 0.0), ("pair-b", 40.0), ("pair-c", 80.0)))
     actions = {

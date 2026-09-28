@@ -676,6 +676,8 @@ class ObservationNormalizer:
         self,
         normalized_frame: NormalizedActorFrame,
         actions: ActionArray,
+        *,
+        oracle_controls_unusable_rows: bool = False,
     ) -> ObservationNormalizationState:
         """Validate selected actions, then update once from valid training rows."""
 
@@ -691,8 +693,18 @@ class ObservationNormalizer:
             actions,
         )
         fallback_index = int(self.action_space.fallback_action)
+        if type(oracle_controls_unusable_rows) is not bool:
+            raise ObservationNormalizationError(
+                "oracle_controls_unusable_rows must be boolean"
+            )
+        if oracle_controls_unusable_rows and not self._frozen:
+            raise ObservationNormalizationError(
+                "only frozen evaluation may let an oracle control unusable rows"
+            )
         wrong_fallback = np.flatnonzero(
-            (~normalized_frame.usable_mask) & (validated != fallback_index)
+            (~normalized_frame.usable_mask)
+            & (validated != fallback_index)
+            & (not oracle_controls_unusable_rows)
         )
         if wrong_fallback.size:
             rows = tuple(int(value) for value in wrong_fallback)

@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from hybrid_v2x_rl.artifacts.store import ArtifactStore
+from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
 from hybrid_v2x_rl.config.hashing import config_hash
 from hybrid_v2x_rl.config.loader import load_headline_config
 from hybrid_v2x_rl.core.policy_actions import PolicyAction
@@ -33,6 +34,7 @@ from hybrid_v2x_rl.mean_field.deterministic_rollout import (
     run_policy_rollout_with_state,
 )
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource
+from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizer
 from hybrid_v2x_rl.mobility.trace_io import MobilityTraceWriter, VehicleTraceRecord
 from hybrid_v2x_rl.observation.builder import ObservationBuilder
 
@@ -421,6 +423,59 @@ def test_shared_runner_never_passes_truth_to_a_causal_policy(config, source) -> 
     )
 
     assert probe.calls == 2
+
+
+def test_non_deployable_oracle_can_control_unusable_rows_only_when_explicit(
+    config,
+    source,
+) -> None:
+    class AllRowsOracle:
+        name = "all-rows-evaluation-probe"
+        requires_oracle_truth = True
+
+        def select_actions(self, decision, *, channel_truth):
+            assert channel_truth is not None
+            return (PolicyAction.VLC,) * decision.population_size
+
+    frozen_identity = ObservationNormalizer.from_config(config).freeze()
+    result = run_policy_rollout_with_state(
+        config,
+        source,
+        policy=AllRowsOracle(),
+        environment_seed=81,
+        max_frames=1,
+        normalization_state=frozen_identity,
+        sensitivity_band=SensitivityBand.PESSIMISTIC,
+        collision_subchannels=8,
+        oracle_controls_unusable_rows=True,
+    )
+
+    assert result.report.transitions > 0
+    assert result.report.fallback_transitions > 0
+    assert result.report.action_counts[int(PolicyAction.VLC)] == (
+        result.report.transitions
+    )
+    assert result.normalization_state == frozen_identity
+
+
+def test_causal_policy_cannot_request_control_of_unusable_rows(config, source) -> None:
+    class CausalProbe:
+        name = "causal-all-rows-probe"
+        requires_oracle_truth = False
+
+        def select_actions(self, decision, *, channel_truth):
+            return (PolicyAction.VLC,) * decision.population_size
+
+    with pytest.raises(
+        DeterministicRolloutError,
+        match="only a declared non-deployable oracle",
+    ):
+        run_policy_rollout_with_state(
+            config,
+            source,
+            policy=CausalProbe(),
+            oracle_controls_unusable_rows=True,
+        )
 
 
 def test_contextual_and_supervised_features_exclude_temporal_link_history() -> None:

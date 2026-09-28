@@ -237,10 +237,15 @@ class LocalRFPhysicsModel:
         config: ProjectConfig,
         *,
         sensitivity_band: SensitivityBand = SensitivityBand.NOMINAL,
+        collision_subchannels: int | None = None,
     ) -> LocalRFPhysicsModel:
         if not isinstance(config, ProjectConfig):
             raise LocalRFPipelineError("local RF physics requires ProjectConfig")
-        rf = build_rf_channel(config, band=sensitivity_band)
+        rf = build_rf_channel(
+            config,
+            band=sensitivity_band,
+            collision_subchannels=collision_subchannels,
+        )
         return cls(
             response_model=LocalRFResponseModel(
                 parameters=rf.collision,

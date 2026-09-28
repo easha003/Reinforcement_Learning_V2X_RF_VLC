@@ -336,6 +336,40 @@ def test_unusable_rows_force_fallback_and_never_update_statistics(config) -> Non
     assert set(state.count) == {0, 1}
 
 
+def test_frozen_non_deployable_oracle_may_control_unusable_rows(config) -> None:
+    normalizer = ObservationNormalizer.from_config(config)
+    normalizer.freeze()
+    frame = _population_frame(split="validation")
+    actor = _actor_frame(config, frame, (None, _row_values(config, 0.0)))
+    normalized = normalizer.begin_frame(frame, actor)
+
+    state = normalizer.complete_frame(
+        normalized,
+        _actions(0, 0),
+        oracle_controls_unusable_rows=True,
+    )
+
+    assert state.frozen
+    assert set(state.count) == {0}
+
+
+def test_training_normalizer_rejects_oracle_control_of_unusable_rows(config) -> None:
+    normalizer = ObservationNormalizer.from_config(config)
+    frame = _population_frame()
+    actor = _actor_frame(config, frame, (None, _row_values(config, 0.0)))
+    normalized = normalizer.begin_frame(frame, actor)
+
+    with pytest.raises(
+        ObservationNormalizationError,
+        match="only frozen evaluation",
+    ):
+        normalizer.complete_frame(
+            normalized,
+            _actions(0, 0),
+            oracle_controls_unusable_rows=True,
+        )
+
+
 def test_validation_and_test_cannot_influence_frozen_training_state(config) -> None:
     normalizer = ObservationNormalizer.from_config(config)
     validation = _population_frame(split="validation")

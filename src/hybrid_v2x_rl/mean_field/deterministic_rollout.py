@@ -489,6 +489,9 @@ def run_policy_rollout_with_state(
     normalization_state: ObservationNormalizationState | Mapping[str, object] | None = None,
     freeze_normalization_at_end: bool = False,
     frame_observer: PopulationRolloutObserver | None = None,
+    sensitivity_band: SensitivityBand = SensitivityBand.NOMINAL,
+    collision_subchannels: int | None = None,
+    oracle_controls_unusable_rows: bool = False,
 ) -> PolicyRolloutResult:
     """Run any population policy through the one authoritative environment path.
 
@@ -522,6 +525,26 @@ def run_policy_rollout_with_state(
         raise DeterministicRolloutError("max_frames must be positive or None")
     if type(freeze_normalization_at_end) is not bool:
         raise DeterministicRolloutError("freeze_normalization_at_end must be boolean")
+    if not isinstance(sensitivity_band, SensitivityBand):
+        raise DeterministicRolloutError(
+            "sensitivity_band must be a declared SensitivityBand"
+        )
+    if collision_subchannels is not None and (
+        not isinstance(collision_subchannels, int)
+        or isinstance(collision_subchannels, bool)
+        or collision_subchannels < 1
+    ):
+        raise DeterministicRolloutError(
+            "collision_subchannels must be a positive integer or None"
+        )
+    if type(oracle_controls_unusable_rows) is not bool:
+        raise DeterministicRolloutError(
+            "oracle_controls_unusable_rows must be boolean"
+        )
+    if oracle_controls_unusable_rows and not policy.requires_oracle_truth:
+        raise DeterministicRolloutError(
+            "only a declared non-deployable oracle may control unusable rows"
+        )
     if frame_observer is not None and not callable(
         getattr(frame_observer, "observe_frame", None)
     ):
@@ -541,13 +564,15 @@ def run_policy_rollout_with_state(
     )
     local_rf_model = LocalRFPhysicsModel.from_config(
         config,
-        sensitivity_band=SensitivityBand.NOMINAL,
+        sensitivity_band=sensitivity_band,
+        collision_subchannels=collision_subchannels,
     )
     physical = build_rollout(
         config,
         buildings=local_rf_model.buildings,
         root_seed=seed_state.active_root_seed,
-        band=SensitivityBand.NOMINAL,
+        band=sensitivity_band,
+        collision_subchannels=collision_subchannels,
     )
     reader = PopulationFrameReader(
         source,
@@ -587,6 +612,9 @@ def run_policy_rollout_with_state(
             "policy_seed": policy_seed,
             "start_frame_index": start_frame_index,
             "max_frames": max_frames,
+            "sensitivity_band": sensitivity_band.value,
+            "collision_subchannels": collision_subchannels,
+            "oracle_controls_unusable_rows": oracle_controls_unusable_rows,
         },
     )
     _fingerprint_update(
@@ -691,13 +719,19 @@ def run_policy_rollout_with_state(
         ):
             selected = action_space.select(
                 proposal,
-                observation_usable=actor_row.usable,
+                observation_usable=(
+                    actor_row.usable or oracle_controls_unusable_rows
+                ),
             )
             proposals.append(selected)
             actions_by_pair[pair.pair_id] = selected
 
         action_array = np.asarray(proposals, dtype=np.int64)
-        normalizer.complete_frame(normalized_frame, action_array)
+        normalizer.complete_frame(
+            normalized_frame,
+            action_array,
+            oracle_controls_unusable_rows=oracle_controls_unusable_rows,
+        )
         ledger = FrameActionLedger.from_frame(
             frame,
             actions_by_pair,
