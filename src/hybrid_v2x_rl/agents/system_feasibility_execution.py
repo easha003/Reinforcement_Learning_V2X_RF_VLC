@@ -26,6 +26,7 @@ from hybrid_v2x_rl.agents.system_feasibility_frontier import (
     FrontierPhysicalPoint,
     SystemFeasibilityFrontierDeclaration,
 )
+from hybrid_v2x_rl.channels.rf.diversity import RFReceiveDiversity
 from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.loader import load_config
 from hybrid_v2x_rl.config.models import ProjectConfig
@@ -876,10 +877,18 @@ def execute_system_feasibility_frontier(
     progress: ProgressCallback | None = None,
     completed_cells: tuple[FrontierCellResult, ...] = (),
     checkpoint: CheckpointCallback | None = None,
+    receive_diversity: RFReceiveDiversity | None = None,
 ) -> SystemFeasibilityFrontierResult:
     """Execute all predeclared cells; partial grids never produce a result."""
 
     dry_run = structural_dry_run(declaration, project_root=project_root)
+    if receive_diversity is not None and not isinstance(
+        receive_diversity,
+        RFReceiveDiversity,
+    ):
+        raise SystemFeasibilityExecutionError(
+            "receive_diversity must be an RFReceiveDiversity profile or None"
+        )
     root = Path(project_root).expanduser().resolve(strict=False)
     total = len(declaration.evaluation_cells)
     expected_prefix = declaration.evaluation_cells[: len(completed_cells)]
@@ -919,6 +928,7 @@ def execute_system_feasibility_frontier(
                 oracle_controls_unusable_rows=fallback.mode == "all_usable",
                 exact_assignment_cap=declaration.exact_assignment_cap,
                 max_search_iterations=declaration.max_search_iterations,
+                receive_diversity=receive_diversity,
             )
             results.append(
                 _cell_result(

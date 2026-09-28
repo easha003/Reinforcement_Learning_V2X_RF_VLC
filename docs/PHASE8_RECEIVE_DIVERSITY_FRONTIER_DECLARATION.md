@@ -1,7 +1,8 @@
 # Phase 8 receive-diversity frontier declaration
 
 Status: experiment frozen and structurally validated; physical implementation
-is complete; frontier execution remains blocked
+and the resumable two-stage executor are complete; frontier execution is in
+progress
 
 Date frozen: 2026-09-28
 
@@ -127,6 +128,7 @@ cannot authorize training.
 The declaration alone does not show that `1e-4` is feasible. The keyed
 correlated second-branch fading and MRC calculation are now implemented and
 connected to the pair-local evaluator; see
-`PHASE8_RECEIVE_DIVERSITY_PHYSICAL_MODEL.md`. The next task is the frozen
-propagation-only screen followed by certificate-aware execution for surviving
-profiles. PPO remains blocked.
+`PHASE8_RECEIVE_DIVERSITY_PHYSICAL_MODEL.md`. The frozen propagation-only
+screen and certificate-aware runner are implemented in
+`PHASE8_RECEIVE_DIVERSITY_EXECUTION.md`; their bounded validation execution is
+the current task. PPO remains blocked.

@@ -1181,7 +1181,9 @@ joint space. Larger frames publish a realizable candidate, a certified
 zero-contention lower bound, and the remaining optimality gap. The bounded
 pair-local frontier and RF-scaling diagnosis are now complete, and the
 full-carrier allocation correction plus receive-diversity experiment
-declaration and physical model are frozen. The immediate next task is to run
-the predeclared propagation-only screen and then the certificate-aware joint
-frontier for every surviving receive profile. No PPO training is authorized
-until the receive-diversity gate yields a feasible headline design.
+declaration and physical model are frozen. The resumable two-stage executor is
+now implemented and structurally validated. The current task is its bounded
+validation execution: the predeclared propagation-only screen followed by the
+certificate-aware joint frontier for every surviving receive profile. No PPO
+training is authorized until the receive-diversity gate yields a feasible
+headline design.
