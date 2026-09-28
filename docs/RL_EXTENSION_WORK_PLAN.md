@@ -772,6 +772,16 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      now unblocked by the completed atomic local-contention migration. Exact
      feasibility claims require exhaustive completion; otherwise the frontier
      must retain the candidate/lower-bound optimality gap.
+     - [x] Freeze the validation windows, 18-point physical grid, two fallback
+       views, certificate-aware verdict hierarchy, robust training gate, and
+       Pareto-minimal change rule before observing any frontier result. The
+       declaration is fail-closed and no learner, checkpoint, or test trace is
+       used. See `PHASE8_PAIR_LOCAL_SYSTEM_FEASIBILITY_FRONTIER.md`.
+     - [ ] Implement the versioned frontier executor and result-artifact
+       contract, then pass a structural dry run without opening the test split.
+     - [ ] Execute all 36 predeclared evaluation cells, retain every open
+       candidate/lower-bound gap, and apply the frozen training-authorization
+       rule before starting any new policy seed.
 5. [x] Apply the reliability curriculum:
 
    ```text

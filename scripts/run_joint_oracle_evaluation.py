@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate the exact population-joint reliability floor on validation windows."""
+"""Evaluate certificate-aware pair-local joint risk on validation windows."""
 
 from __future__ import annotations
 
@@ -63,19 +63,18 @@ def main() -> int:
         state_regime_audit_path=_resolve(project_root, args.state_regime_audit),
     )
     output = report.write_json(_resolve(project_root, args.out))
-    print(f"joint oracle windows: {len(report.windows)}")
+    print(f"pair-local joint-search windows: {len(report.windows)}")
     for row in report.densities:
         print(
             f"density={row['density_vehicles_per_lane_km']:g} "
-            f"risk={row['mean_joint_oracle_conditional_miss_risk']:.8g} "
-            f"budget_multiple={row['joint_oracle_risk_budget_multiple']:.4g} "
-            f"meets_budget={row['joint_oracle_mean_meets_budget']}"
+            f"risk={row['mean_pair_local_candidate_conditional_miss_risk']:.8g} "
+            f"budget_multiple={row['pair_local_candidate_risk_budget_multiple']:.4g} "
+            f"meets_budget={row['pair_local_candidate_mean_meets_budget']}"
         )
     decision = report.as_dict()["decision"]
-    print(
-        "all densities meet joint floor: "
-        f"{decision['all_densities_meet_joint_oracle_floor']}"
-    )
+    if not isinstance(decision, dict):
+        raise TypeError("pair-local evaluation decision must be an object")
+    print(f"verdict: {decision['verdict']}")
     print("test split opened: False")
     print(f"wrote {output}")
     return 0
