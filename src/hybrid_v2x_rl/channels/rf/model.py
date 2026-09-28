@@ -21,9 +21,9 @@ to measure rather than manufacture.
 records which one actually fired. Section 7.2's mechanism is decoupled from
 optical blockage; section 7.1's is the same geometric event that severs the
 optical path. A single aggregate probability would let a diversity claim rest
-on whichever one the reader assumed, and measurement so far says the two differ
-by two to four orders of magnitude -- so the aggregate would be collision under
-another name while looking like a channel result.
+on whichever one the reader assumed, even though their relative importance
+changes with propagation state -- so the aggregate would hide the actual
+limiting mechanism.
 
 **Randomness is supplied, never drawn here.** The caller passes the uniform
 draws for this packet, so a trace regenerates bit-exactly and so a counterfactual

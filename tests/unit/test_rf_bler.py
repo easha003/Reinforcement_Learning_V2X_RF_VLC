@@ -2,10 +2,10 @@
 
 The last group of tests pins what the assembled budget *implies*: that this
 profile is not thermal-noise limited anywhere in the tagged-pair window, and
-that RF failure is therefore collision-dominated by two to four orders of
-magnitude. That is a structural result about the contribution, not a property
-of the formula, so it is asserted here where it will break loudly if a
-parameter moves.
+that LOS RF failure is therefore collision-dominated by roughly one to two
+orders of magnitude. That is a structural result about the contribution, not
+a property of the formula, so it is asserted here where it will break loudly
+if a parameter moves.
 """
 
 from __future__ import annotations
@@ -34,9 +34,10 @@ from hybrid_v2x_rl.channels.rf.collision import (
 )
 from hybrid_v2x_rl.channels.rf.pathloss_37885 import median_path_loss_db
 from hybrid_v2x_rl.config.loader import headline_config_layers, load_config
+from hybrid_v2x_rl.config.models import BITS_PER_RESOURCE_ELEMENT
 from hybrid_v2x_rl.core.enums import RFPropagationState
 
-BLOCKLENGTH = 4838
+BLOCKLENGTH = 2419
 INFORMATION_BITS = 2784
 
 
@@ -81,7 +82,7 @@ def test_bler_falls_monotonically_with_snr() -> None:
 
 
 def test_bler_rises_when_more_bits_are_pushed_through_the_same_block() -> None:
-    snr = 10 ** (-0.25)
+    snr = 10 ** (2.0 / 10.0)
     light = block_error_probability(snr, BLOCKLENGTH, INFORMATION_BITS)
     heavy = block_error_probability(snr, BLOCKLENGTH, 2 * INFORMATION_BITS)
     assert heavy > light
@@ -99,7 +100,7 @@ def test_required_snr_inverts_the_forward_direction() -> None:
 def test_the_waterfall_is_steep_at_this_blocklength() -> None:
     """Four decades of BLER inside half a decibel.
 
-    A consequence of 4,838 channel uses: the normal approximation's transition
+    A consequence of 2,419 channel uses: the normal approximation's transition
     sharpens as sqrt(n), so the link is essentially binary in SNR. That is why
     the margin table below is the interesting object and the BLER curve is not.
     """
@@ -122,11 +123,11 @@ def test_zero_snr_loses_every_block() -> None:
 
 
 def test_the_configured_grid_gives_the_expected_blocklength_and_rate(rf) -> None:
-    uses = rf.available_coded_bits() / 2.0          # QPSK carries 2 bits per use
+    uses = rf.available_coded_bits() / BITS_PER_RESOURCE_ELEMENT[rf.modulation]
     bits = (300 + rf.timing.framing_overhead_bytes) * 8
     assert uses == pytest.approx(BLOCKLENGTH, abs=1)
     assert bits == INFORMATION_BITS
-    assert bits / uses == pytest.approx(0.575, abs=0.005)
+    assert bits / uses == pytest.approx(1.151, abs=0.005)
 
 
 def snr_db_at(rf, distance_m: float, state: RFPropagationState, blockage_db: float = 0.0) -> float:
@@ -143,23 +144,23 @@ def snr_db_at(rf, distance_m: float, state: RFPropagationState, blockage_db: flo
 def test_the_link_is_not_thermal_noise_limited_anywhere_in_the_window(rf) -> None:
     """The finding that reorders M3's priorities.
 
-    1e-5 needs -2.5 dB. The median budget delivers 53.5 dB at 5 m and 31.8 dB
-    at 100 m, so there is 34 to 56 dB of margin over what the code requires.
+    1e-5 needs 1.46 dB. The median budget delivers 53.5 dB at 5 m and 31.8 dB
+    at 100 m, so there is 30 to 52 dB of margin over what the code requires.
     Even a building-blocked link at 100 m clears it. Thermal noise is simply
     not the mechanism, and a reliability story told through the link budget
     would be telling the wrong story.
     """
 
     need = required_snr_db(1e-5, BLOCKLENGTH, INFORMATION_BITS)
-    assert need == pytest.approx(-2.5, abs=0.1)
+    assert need == pytest.approx(1.46, abs=0.1)
 
     for distance, expected in ((5.0, 53.5), (100.0, 31.8)):
         snr = snr_db_at(rf, distance, RFPropagationState.LOS)
         assert snr == pytest.approx(expected, abs=0.2)
-        assert snr - need > 34.0
+        assert snr - need > 30.0
 
     # Even the worst class at the far edge of the window still closes.
-    assert snr_db_at(rf, 100.0, RFPropagationState.NLOS) - need > 4.0
+    assert snr_db_at(rf, 100.0, RFPropagationState.NLOS) - need > 5.0
 
 
 def rayleigh_outage(margin_db: float) -> float:
@@ -171,12 +172,10 @@ def rayleigh_outage(margin_db: float) -> float:
 @pytest.mark.parametrize(
     ("state", "blockage_db", "distance_m", "expected"),
     [
-        (RFPropagationState.LOS, 0.0, 100.0, 3.7e-4),
-        (RFPropagationState.NLOSV, 9.0, 100.0, 3.0e-3),
-        # NLOS values fell when the permuted coefficients were corrected: 2.8e-1
-    # and 2.6e-2 were computed from an NLOS distance exponent of 3.685.
-    (RFPropagationState.NLOS, 0.0, 100.0, 1.17e-1),
-        (RFPropagationState.NLOS, 0.0, 50.0, 1.54e-2),
+        (RFPropagationState.LOS, 0.0, 100.0, 9.29e-4),
+        (RFPropagationState.NLOSV, 9.0, 100.0, 7.36e-3),
+        (RFPropagationState.NLOS, 0.0, 100.0, 2.66e-1),
+        (RFPropagationState.NLOS, 0.0, 50.0, 3.79e-2),
     ],
 )
 def test_deep_fade_outage_is_where_the_budget_actually_fails(
@@ -197,9 +196,9 @@ def test_deep_fade_outage_is_where_the_budget_actually_fails(
 def test_rf_failure_is_collision_dominated_not_budget_dominated(rf) -> None:
     """The structural conclusion, and it favours the contribution.
 
-    At 100 m in LOS the budget fails 3.7e-4 of the time from deep fades. The
-    analytical collision model loses 1.5% to 12% of packets over the same
-    band. Collision is larger by two orders of magnitude at every density and
+    At 100 m in LOS the budget fails about 9.3e-4 of the time from deep fades.
+    The analytical access model loses about 2% to 13% of packets over the same
+    band. Access failure is at least twenty times larger at every density and
     every end of the declared band.
 
     That matters because collision is the RF failure mode *decoupled* from
@@ -214,7 +213,7 @@ def test_rf_failure_is_collision_dominated_not_budget_dominated(rf) -> None:
     for density, neighbours in ((10, 44), (20, 100), (30, 159)):
         for band in SensitivityBand:
             access = failure_probability(neighbours, headline_parameters(band))
-            assert access > 40 * budget, (
+            assert access > 20 * budget, (
                 f"at rho={density} band={band.value} collision {access:.3f} "
                 f"should dominate budget outage {budget:.2e}"
             )

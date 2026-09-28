@@ -51,7 +51,11 @@ def test_rf_single_slot_qpsk_is_rejected_at_headline_block_size(tmp_path: Path) 
     with pytest.raises(ConfigurationError, match="RF gross rate is unachievable"):
         _load_with_override(
             tmp_path,
-            "rf:\n  timing:\n    gross_bit_rate_bps: 20000000.0\n    airtime_s: 0.0005\n",
+            "rf:\n"
+            "  modulation: qpsk\n"
+            "  timing:\n"
+            "    gross_bit_rate_bps: 20000000.0\n"
+            "    airtime_s: 0.0005\n",
         )
 
 

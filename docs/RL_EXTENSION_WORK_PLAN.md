@@ -817,6 +817,19 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        independent-diversity assumptions. Freeze the configurations and their
        calibration evidence before running another certificate-aware joint
        feasibility frontier; do not treat the abstract divisor as deployable.
+       - [x] Audit the active RF link calculation, standards anchors,
+         calibration-artifact availability, and collision-pool allocation
+         semantics. `PHASE8_RF_PHYSICAL_CALIBRATION_AUDIT.md` records the live
+         `n=2419`, `k=2784` finite-blocklength input and finds that each link
+         consumes all 24 RB while the collision model counts two 12-RB
+         subchannels. The rate-1/3 block cannot fit one such subchannel, and
+         the declared RF calibration artifact is absent. The audit therefore
+         fails closed and starts no training.
+       - [ ] Freeze the recommended full-10-MHz-carrier allocation contract,
+         correct the physical pool mapping to 1/2/4 resources at 10/20/40 MHz,
+         and then predeclare a calibrated independent receive-diversity
+         frontier. Re-run only the affected certificate-aware feasibility
+         evidence; mobility traces and completed state audits remain reusable.
 5. [x] Apply the reliability curriculum:
 
    ```text

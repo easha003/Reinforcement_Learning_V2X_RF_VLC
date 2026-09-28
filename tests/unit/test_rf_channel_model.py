@@ -24,7 +24,7 @@ from hybrid_v2x_rl.channels.rf.model import (
 )
 from hybrid_v2x_rl.core.enums import FailureCause, RFPropagationState
 
-BLOCKLENGTH = 4838
+BLOCKLENGTH = 2419
 INFORMATION_BITS = 2784
 
 
@@ -187,7 +187,7 @@ def test_the_two_mechanisms_stay_separable_in_the_result() -> None:
 
 
 def test_collision_dominates_the_budget_in_the_measured_regime() -> None:
-    """Measured across M3: by two to four orders of magnitude."""
+    """The active-profile fixture remains access-limited in ordinary LOS."""
 
     for neighbours in (44, 100, 159):
         result = channel().evaluate(request(neighbours=neighbours))
@@ -228,7 +228,7 @@ def test_shadowing_moves_the_budget_by_its_class_spread() -> None:
 
 
 def test_a_deep_fade_is_what_actually_breaks_the_budget() -> None:
-    """The link has 34 to 56 dB of margin, so only the fading tail reaches it."""
+    """The LOS link has about 30 to 52 dB of margin across the pair window."""
 
     model = channel()
     typical = model.evaluate(request(distance_m=100.0, fading=1.0, draws=(0.99, 0.5, 0.99)))

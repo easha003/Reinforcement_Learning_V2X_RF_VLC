@@ -11,18 +11,18 @@ this is the approximation, and the documentation is the point of the module.
    applied by the caller as a power gain before the packet is evaluated, so the
    BLER here is conditional on one fading realization and is *not* averaged
    over the fading distribution. Averaging is the caller's business because the
-   deadline permits at most two attempts and their correlation matters -- see
+   deadline permits multiple attempts and their correlation matters -- see
    :mod:`hybrid_v2x_rl.channels.rf.fading`.
 2. *Channel uses*: resource elements carrying data, from the configured grid
    after the declared overhead. The blocklength is a count of complex symbols,
    not of bits.
 3. *Modulation and coding*: the approximation is information-theoretic and
    assumes an optimal code at the given rate. It therefore **understates** the
-   error of a real QPSK rate-1/3 transport block, by an implementation margin
+   error of a real 16QAM rate-1/3 transport block, by an implementation margin
    that is not modelled. Any reliability claim built on it is optimistic and
    must say so.
 4. *Validity*: the normal approximation is accurate for blocklengths of a few
-   hundred channel uses upward. The configured grid gives roughly 4,800, which
+   hundred channel uses upward. The configured grid gives roughly 2,400, which
    is comfortably inside. Below :data:`MIN_BLOCKLENGTH` the call is refused
    rather than extrapolated.
 

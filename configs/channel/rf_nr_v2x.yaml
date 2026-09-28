@@ -6,16 +6,15 @@ rf:
   slot_s: 0.0005
   # 10 MHz at 30 kHz SCS is 24 RB (TS 38.101-1 Table 5.3.2-1).
   resource_blocks: 24
-  # 16QAM, chosen to buy time rather than throughput.  The link carries 34-56 dB
+  # 16QAM, chosen to buy time rather than throughput.  The link carries 30-52 dB
   # of margin over what decoding needs across the whole pair window (M3), and
   # the profile was spending none of it.  16QAM costs about 6 dB and halves the
   # allocation from two slots to one, which is what makes three hopped
   # retransmissions fit inside the 3 ms deadline.
   #
-  # The trade is deliberate and one-directional: RF failure here is
-  # collision-dominated by two to four orders of magnitude, so spending margin
-  # on attempts attacks the mechanism that actually fails and spending it on a
-  # lower-order modulation would not.
+  # In the LOS boundary check, analytical access failure is roughly 22-135x
+  # the deep-fade outage. Other propagation classes are reported separately;
+  # they must not be collapsed into that LOS statement.
   modulation: "16qam"
   # AGC symbol, transmit/receive guard symbol, PSSCH DMRS, and PSCCH.
   resource_element_overhead: 0.40
