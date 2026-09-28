@@ -1,0 +1,49 @@
+schema: "hybrid-rf-vlc-rl.rf-decoding-reliability-scaling-declaration.v1"
+frozen_date: "2026-09-28"
+
+objective:
+  miss_budget: 0.0001
+  densities_vehicles_per_lane_km: [10.0, 20.0, 30.0]
+  required_split: "validation"
+  test_split_opened: false
+  interpretation: "necessary-condition diagnostic, not a deployable physical design or training authorization"
+
+evidence:
+  system_frontier_declaration:
+    path: "configs/evaluation/pair_local_system_feasibility_frontier.yaml"
+    sha256: "c6499afeb4d7ecf15c09bbe3006dd08183a4d3ce97c1e524d0e8ba93356c3cf2"
+  system_frontier_result:
+    path: "artifacts/evaluations/phase8_pair_local_system_feasibility_frontier.json"
+    sha256: "b5d44445b5a7c61cdb9d178793f26fc6a39ca75e84e7d4406f2963f9bf138944"
+    schema: "hybrid-rf-vlc-rl.pair-local-system-feasibility-frontier-result.v1"
+  anchor_physical_point_id: "rf-capacity-4x__concentrated-30deg__nominal"
+  anchor_diagnostic_cell_id: "rf-capacity-4x__concentrated-30deg__nominal__all-rows-oracle-controlled"
+  actor_used: false
+  checkpoint_used: false
+
+intervention:
+  name: "rf-decoding-failure-divisor"
+  factors: [1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
+  semantics: "divide each pair's action-independent RF decoding-failure probability by the declared factor"
+  unchanged: "VLC risk, action set, fallback contract, traces, windows, random tapes, RF contention, and half-duplex models"
+  nonphysical_diagnostic: true
+
+views:
+  - name: "contract-dup4"
+    mode: "contract"
+  - name: "all-rows-oracle-controlled"
+    mode: "all_usable"
+
+execution:
+  expected_factors: 6
+  expected_views: 2
+  expected_density_rows: 36
+  no_joint_action_search: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_rf_decoding_reliability_scaling.json"
+
+decision:
+  threshold_rule: "smallest declared factor whose mean optimistic lower bound is <= miss_budget at every density"
+  interpretation: "necessary RF-decoding improvement under an optimistic zero-contention and zero-half-duplex bound; not sufficient for a realizable policy"
+  training_authorization: false
