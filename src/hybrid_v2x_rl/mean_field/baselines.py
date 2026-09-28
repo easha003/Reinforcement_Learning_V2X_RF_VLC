@@ -3,7 +3,7 @@
 The policies in this module only choose actions.  They do not evaluate packets,
 sample outcomes, or maintain a second resource model.  Their proposals are
 validated by the common action-mask boundary and then pass through the same
-``FrameActionLedger``, RF pool, matched random tapes, physical channels,
+``FrameActionLedger``, pair-local RF physics, matched random tapes, physical channels,
 feedback, and lifecycle code used by random policies and, later, PPO.
 """
 
@@ -17,16 +17,18 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 from numpy.typing import NDArray
 
+from hybrid_v2x_rl.channels.rf.model import RFPropagationResult
+from hybrid_v2x_rl.core.enums import RFPropagationState
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import PolicyAction, action_resources
 from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import FrameLocalRFPhysics
 from hybrid_v2x_rl.mean_field.policy_interface import (
     OracleChannelTruth,
     PolicyProposal,
     PopulationPolicy,
     PopulationPolicyFrame,
 )
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolResponse
 
 if TYPE_CHECKING:
     from hybrid_v2x_rl.config.models import ProjectConfig
@@ -262,7 +264,7 @@ class ContextualNoHistoryBaseline:
         if channel_truth is not None:
             raise BaselinePolicyError("the contextual baseline cannot receive oracle truth")
         columns = _column_map(decision.columns, CONTEXTUAL_FEATURES)
-        parameters = decision.pool_model.attempt_parameters
+        parameters = decision.local_rf_model.response_model.attempt_parameters
         half_duplex_floor = parameters.airtime_s / parameters.generation_period_s
         proposals: list[PolicyProposal] = []
         for row in decision.actor_frame.rows:
@@ -452,14 +454,28 @@ class SupervisedOpticalRiskEstimator:
 
 def _risk_matrix(
     decision: PopulationPolicyFrame,
-    response: RFPoolResponse,
+    physics: FrameLocalRFPhysics,
     *,
     vlc_risk: NDArray[np.float64],
     rf_decoding_risk: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     population = decision.population_size
     allowed = decision.action_space.mask.allowed_actions
-    access = decision.pool_model.access_failure_probability(response)
+    collision = np.asarray(
+        [
+            physics.responses.response_for(pair_id).per_attempt_collision_probability
+            for pair_id in decision.frame.active_pair_ids
+        ],
+        dtype=np.float64,
+    )
+    half_duplex = np.asarray(
+        [
+            physics.endpoint_schedule.exposure_for(pair_id).half_duplex_probability
+            for pair_id in decision.frame.active_pair_ids
+        ],
+        dtype=np.float64,
+    )
+    access = 1.0 - (1.0 - collision) * (1.0 - half_duplex)
     per_attempt = 1.0 - (1.0 - access) * (1.0 - rf_decoding_risk)
     result = np.empty((population, len(allowed)), dtype=np.float64)
     for action_index, action in enumerate(allowed):
@@ -471,6 +487,25 @@ def _risk_matrix(
             risk *= vlc_risk
         result[:, action_index] = np.clip(risk, 0.0, 1.0)
     return result
+
+
+def _analytical_propagation(
+    decision: PopulationPolicyFrame,
+    rf_decoding_risk: NDArray[np.float64],
+) -> dict[str, RFPropagationResult]:
+    """Bind analytical probabilities to valid simulator-diagnostic rows."""
+
+    return {
+        pair_id: RFPropagationResult(
+            propagation_state=RFPropagationState.LOS,
+            pathloss_db=0.0,
+            shadowing_db=0.0,
+            fading_gain_linear=1.0,
+            sinr_db=0.0,
+            decoding_failure_probability=float(rf_decoding_risk[index]),
+        )
+        for index, pair_id in enumerate(decision.frame.active_pair_ids)
+    }
 
 
 def _greedy_budget_allocation(
@@ -577,6 +612,7 @@ def _analytical_fixed_point(
         seed_actions(vlc_seed),
         seed_actions(rf_seed),
     )
+    propagation = _analytical_propagation(decision, rf_decoding_risk)
     candidates: list[tuple[bool, float, float, tuple[PolicyAction, ...]]] = []
     for seed in seeds:
         actions = seed
@@ -590,12 +626,14 @@ def _analytical_fixed_point(
                 dict(zip(decision.frame.active_pair_ids, actions, strict=True)),
                 resource_map=decision.resource_map,
             )
-            response = decision.pool_model.evaluate(
-                decision.pool_model.demand_from_ledger(ledger)
+            physics = decision.local_rf_model.evaluate(
+                decision.local_rf_context,
+                ledger,
+                propagation_by_pair=propagation,
             )
             risks = _risk_matrix(
                 decision,
-                response,
+                physics,
                 vlc_risk=vlc_risk,
                 rf_decoding_risk=rf_decoding_risk,
             )
@@ -609,12 +647,14 @@ def _analytical_fixed_point(
             dict(zip(decision.frame.active_pair_ids, actions, strict=True)),
             resource_map=decision.resource_map,
         )
-        response = decision.pool_model.evaluate(
-            decision.pool_model.demand_from_ledger(ledger)
+        physics = decision.local_rf_model.evaluate(
+            decision.local_rf_context,
+            ledger,
+            propagation_by_pair=propagation,
         )
         risks = _risk_matrix(
             decision,
-            response,
+            physics,
             vlc_risk=vlc_risk,
             rf_decoding_risk=rf_decoding_risk,
         )

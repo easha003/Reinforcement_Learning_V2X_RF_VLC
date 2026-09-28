@@ -1,6 +1,6 @@
 # Pair-local RF contention contract v1
 
-Status: frozen migration boundary; not yet wired into rollout
+Status: frozen, implemented, tested, and live in the atomic rollout path
 
 Date frozen: 2026-09-27
 
@@ -12,10 +12,9 @@ spatial topology and action-coupled local demand before collision,
 half-duplex, feedback, or packet outcomes are migrated. Pair-local sensing is
 now frozen in the companion `PAIR_LOCAL_RF_SENSING_CONTRACT_V1.md`.
 
-The implementation is intentionally not connected to the live rollout yet. A
-partially migrated environment could calculate local feedback while retaining
-global packet risk, creating a harder observation/physics mismatch than the
-one being repaired.
+The implementation is connected only through the completed atomic migration.
+There was no intermediate live state in which local feedback coexisted with
+global packet risk.
 
 ## Identities and local membership
 
@@ -119,19 +118,11 @@ canonical ordering, empty-frame behavior, exact per-domain conservation,
 shared-transmitter flow identity, frame binding, and the spatial-reuse
 invariant that a distant action change cannot alter focal demand.
 
-## Explicitly deferred boundaries
+## Completed integration
 
-The live environment still uses the old global pool until all migration
-boundaries are ready. Pair-local sensing, collision/CBR responses, endpoint
-half-duplex exposure, and analytical RF attempt-risk composition are
-implemented and tested but, like this topology boundary, are not yet connected
-to rollout. The remaining changes are:
-
-1. Pair-specific packet-risk and sampled-outcome assembly from the completed
-   attempt-risk boundary.
-2. Delayed local/aggregate congestion feedback semantics.
-3. Baseline and oracle migration to overlapping local domains.
-4. Removal or archival of the old global `D_t` physical-risk path.
-
-The rollout migration must occur atomically after these components agree on
-identity, units, and timing.
+Pair-local sensing, collision/CBR responses, endpoint half-duplex exposure,
+analytical attempt risk, packet outcomes, delayed aggregate feedback,
+baselines, and the feasibility evaluator now share one frame context and one
+selected ledger. The legacy global `D_t` path is retained only for historical
+contract tests and archived analysis; it is not a live rollout consumer. See
+`PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.

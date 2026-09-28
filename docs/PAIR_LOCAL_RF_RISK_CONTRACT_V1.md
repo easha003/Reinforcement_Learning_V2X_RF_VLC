@@ -1,7 +1,6 @@
 # Pair-local RF attempt-risk contract v1
 
-Status: frozen migration boundary; implemented and tested; not yet wired into
-rollout
+Status: frozen, implemented, tested, and live in the atomic rollout path
 
 Date frozen: 2026-09-27
 
@@ -16,9 +15,9 @@ attempt without sampling its outcome:
 - policy-independent RF propagation and decoding failure.
 
 The result replaces the legacy combination of global collision risk and
-population-mean half-duplex exposure. It remains isolated until packet
-outcomes, delayed feedback, baselines, and the feasibility oracle migrate to
-the pair-local physics atomically.
+population-mean half-duplex exposure. Packet outcomes, delayed feedback,
+baselines, and the feasibility evaluator now consume it through the shared
+atomic assembler.
 
 ## Identity and input agreement
 
@@ -73,9 +72,10 @@ failure. Consequently the identity-addressed
 `hybrid-rf-vlc-rl.matched-packet-tape.v1` schema and its four RF draws per
 packet remain unchanged.
 
-Outcome sampling stays deferred to the atomic rollout migration. This prevents
-an intermediate environment in which local risk and global outcome semantics
-coexist.
+Outcome sampling remains downstream of analytical composition and consumes the
+pre-addressed tape only in the packet-outcome boundary. Thus local risk and
+sampled outcomes share one selected ledger without moving the randomness
+boundary.
 
 ## Implemented boundary and evidence
 
@@ -95,7 +95,6 @@ ordering invariance, frame/count/timing validation, propagation and derived
 field validation, and preservation of the matched-tape schema without tape
 consumption.
 
-The next task is the atomic migration of packet outcomes, delayed feedback,
-baselines, and the feasibility oracle to these pair-local risks. No PPO
-training is authorized before that migration is validated and the corrected
-feasibility gate is rerun.
+`PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md` records the completed atomic migration.
+The next task is the corrected, certificate-aware system-feasibility frontier.
+No PPO training is authorized before that gate is evaluated.

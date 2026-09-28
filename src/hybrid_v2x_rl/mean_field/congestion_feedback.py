@@ -9,8 +9,8 @@ This module makes that timing a state machine rather than a convention:
 2. actors receive only that frozen signal through
    :meth:`DelayedCongestionFeedback.actor_observation`;
 3. :meth:`DelayedCongestionFeedback.close_frame` accepts the audited current
-   RF-pool response only after observation/action selection and queues it for
-   the *next* frame.
+   pair-local response set only after observation/action selection and queues
+   its conserved aggregate attempt fraction for the *next* frame.
 
 Reset is ``[0, 0]``: zero value with an invalid flag.  A genuinely empty frame
 queues ``[0, 1]`` instead, preserving the contract's distinction between
@@ -27,7 +27,7 @@ from typing import Final, Protocol, runtime_checkable
 
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import MAX_RESERVED_RF_ATTEMPTS
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolResponse
+from hybrid_v2x_rl.mean_field.local_rf_response import FrameLocalRFResponses
 from hybrid_v2x_rl.observation.builder import ObservationSchema
 
 MEAN_FIELD_COLUMNS: Final = (
@@ -317,39 +317,42 @@ class DelayedCongestionFeedback:
             raise CongestionFeedbackError("no next-frame feedback is queued")
         return self._pending
 
-    def close_frame(self, response: RFPoolResponse) -> None:
+    def close_frame(self, responses: FrameLocalRFResponses) -> None:
         """Queue current audited demand for the next decision frame."""
 
         if self._trace_id is None or self._open_frame_index is None:
             raise CongestionFeedbackError("no decision frame is open")
-        if not isinstance(response, RFPoolResponse):
+        if not isinstance(responses, FrameLocalRFResponses):
             raise CongestionFeedbackError(
-                "closing congestion feedback requires an RF-pool response"
+                "closing congestion feedback requires pair-local RF responses"
             )
-        demand = response.demand
         if (
-            demand.trace_id != self._trace_id
-            or demand.frame_index != self._open_frame_index
+            responses.trace_id != self._trace_id
+            or responses.frame_index != self._open_frame_index
         ):
             raise CongestionFeedbackError(
-                "RF-pool response does not belong to the open decision frame",
+                "pair-local RF response set does not belong to the open decision frame",
                 context={
-                    "response": (demand.trace_id, demand.frame_index),
+                    "responses": (responses.trace_id, responses.frame_index),
                     "open": (self._trace_id, self._open_frame_index),
                 },
             )
 
+        focal_attempts = tuple(
+            response.load.focal_rf_attempts
+            for response in responses.responses
+        )
         fraction = (
-            demand.offered_rf_attempts
-            / (self.max_rf_attempts * demand.active_pairs)
-            if demand.active_pairs > 0
+            sum(focal_attempts)
+            / (self.max_rf_attempts * len(focal_attempts))
+            if focal_attempts
             else 0.0
         )
         pending = MeanFieldSignal(
             mean_rf_attempt_fraction=fraction,
             valid=True,
-            source_trace_id=demand.trace_id,
-            source_frame_index=demand.frame_index,
+            source_trace_id=responses.trace_id,
+            source_frame_index=responses.frame_index,
         )
         self._pending = pending
         self._expected_frame_index = self._open_frame_index + 1

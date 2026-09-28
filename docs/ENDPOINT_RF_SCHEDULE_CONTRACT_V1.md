@@ -1,7 +1,6 @@
 # Endpoint RF schedule and half-duplex contract v1
 
-Status: frozen migration boundary; implemented and tested; not yet wired into
-rollout
+Status: frozen, implemented, tested, and live in the atomic rollout path
 
 Date frozen: 2026-09-27
 
@@ -15,8 +14,8 @@ serves multiple flows.
 This contract assigns every selected service-flow reservation to its physical
 transmitter exactly once, serializes reservations without merging packet
 identities, and derives half-duplex exposure from the focal receiver's own RF
-activity. It remains isolated until packet outcomes and the rest of the local
-rollout migrate together.
+activity. It is now integrated with packet outcomes and the rest of the local
+rollout through one atomic assembler.
 
 ## Service flows and physical radios
 
@@ -109,7 +108,7 @@ VLC release, empty-frame behavior, ordering invariance, frame binding, timing
 validation, and fail-closed derived-field reconciliation.
 
 This simulator-truth activity is not added to the actor observation. The
-companion `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md` now composes pair-local
+companion `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md` composes pair-local
 collision, endpoint half-duplex, and RF propagation into pair-specific attempt
-risk without changing the matched-tape boundary. Both remain isolated until
-the atomic rollout migration.
+risk without changing the matched-tape boundary. Both are now live through the
+atomic assembler documented in `PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.

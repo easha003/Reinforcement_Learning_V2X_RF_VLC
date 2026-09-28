@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
 from hybrid_v2x_rl.channels.rf.model import (
     RFPacketRandomness,
     RFPropagationRequest,
@@ -32,6 +31,17 @@ from hybrid_v2x_rl.mean_field.action_ledger import (
 from hybrid_v2x_rl.mean_field.actor_observations import CausalActorFrame
 from hybrid_v2x_rl.mean_field.critic_observations import CriticObservationFrame
 from hybrid_v2x_rl.mean_field.environment_api import FrameObservation
+from hybrid_v2x_rl.mean_field.frames import (
+    FrameTraceSource,
+    PairLifecycle,
+    PopulationFrame,
+    PopulationPair,
+)
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import (
+    FrameLocalRFPhysics,
+    LocalRFPhysicsModel,
+)
+from hybrid_v2x_rl.mean_field.local_rf_risk import PairLocalRFAttemptRisk
 from hybrid_v2x_rl.mean_field.packet_outcomes import (
     PacketOutcomeError,
     assemble_frame_outcomes,
@@ -41,12 +51,7 @@ from hybrid_v2x_rl.mean_field.random_tape import (
     MatchedPacketTapeFactory,
     PacketRandomnessIdentity,
 )
-from hybrid_v2x_rl.mean_field.rf_pool import (
-    RFAttemptRisk,
-    RFPoolDemand,
-    RFPoolModel,
-    RFPoolResponse,
-)
+from hybrid_v2x_rl.mobility.trace_io import VehicleTraceRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TRACE_ID = "synthetic-d20-train-000"
@@ -82,13 +87,54 @@ def _ledger(actions: tuple[PolicyAction, ...]) -> FrameActionLedger:
     )
 
 
-def _model() -> RFPoolModel:
-    config = load_headline_config(PROJECT_ROOT)
-    channel = build_rf_channel(config)
-    return RFPoolModel(
-        parameters=channel.collision,
-        sensitivity_band=SensitivityBand.NOMINAL,
-        attempt_airtime_s=config.rf.timing.airtime_s,
+def _frame(population: int) -> PopulationFrame:
+    vehicles: list[VehicleTraceRecord] = []
+    pairs: list[PopulationPair] = []
+    for index in range(population):
+        transmitter = VehicleTraceRecord(
+            trace_id=TRACE_ID,
+            time_s=0.7,
+            vehicle_id=f"tx-{index}",
+            x_m=float(index * 20),
+            y_m=0.0,
+            heading_rad=0.0,
+            speed_mps=0.0,
+            acceleration_mps2=0.0,
+            length_m=4.5,
+            width_m=1.8,
+            height_m=1.5,
+            lane_id="edge-0_0",
+            edge_id="edge-0",
+            route_id="route-0",
+            vehicle_type="passenger",
+        )
+        receiver = replace(
+            transmitter,
+            vehicle_id=f"rx-{index}",
+            x_m=float(index * 20 + 10),
+        )
+        vehicles.extend((transmitter, receiver))
+        pairs.append(
+            PopulationPair(
+                pair_id=f"pair-{index}",
+                episode_step=4,
+                transmitter=transmitter,
+                receiver=receiver,
+                lifecycle=PairLifecycle(born=False),
+            )
+        )
+    return PopulationFrame(
+        source=FrameTraceSource(
+            path=Path(TRACE_ID),
+            trace_id=TRACE_ID,
+            split="train",
+            density=20.0,
+            replicate=0,
+        ),
+        index=7,
+        time_s=0.7,
+        vehicles=tuple(sorted(vehicles, key=lambda row: row.vehicle_id)),
+        pairs=tuple(pairs),
     )
 
 
@@ -131,14 +177,14 @@ def _inputs(
     vlc_probability: float = 0.4,
 ) -> tuple[
     FrameActionLedger,
-    RFPoolResponse,
+    FrameLocalRFPhysics,
     dict[str, MatchedPacketTape],
-    dict[str, RFAttemptRisk],
+    dict[str, PairLocalRFAttemptRisk],
     dict[str, VLCChannelResult],
 ]:
     ledger = _ledger(actions)
-    model = _model()
-    response = model.evaluate(RFPoolDemand.from_ledger(ledger))
+    frame = _frame(len(actions))
+    model = LocalRFPhysicsModel.from_config(load_headline_config(PROJECT_ROOT))
     tapes = {
         row.pair_id: MatchedPacketTapeFactory(seed).build(
             PacketRandomnessIdentity(
@@ -149,13 +195,16 @@ def _inputs(
         )
         for row in ledger.pair_accounting
     }
-    propagation = _propagation()
+    propagation = {
+        pair_id: _propagation() for pair_id in ledger.pair_ids
+    }
+    physics = model.evaluate(
+        model.context_for(frame),
+        ledger,
+        propagation_by_pair=propagation,
+    )
     risks = {
-        row.pair_id: model.combine_attempt_risk(
-            response,
-            pair_id=row.pair_id,
-            propagation=propagation,
-        )
+        row.pair_id: physics.attempt_risks.risk_for(row.pair_id)
         for row in ledger.pair_accounting
         if row.uses_rf
     }
@@ -167,7 +216,7 @@ def _inputs(
         for row in ledger.pair_accounting
         if row.uses_vlc
     }
-    return ledger, response, tapes, risks, vlc
+    return ledger, physics, tapes, risks, vlc
 
 
 def _fixed_tape(
@@ -197,13 +246,12 @@ def _fixed_tape(
 
 def test_all_nine_actions_emit_contract_shaped_reward_cost_and_risk() -> None:
     actions = tuple(PolicyAction)
-    ledger, response, tapes, risks, vlc = _inputs(actions)
+    ledger, physics, tapes, risks, vlc = _inputs(actions)
 
     frame = assemble_frame_outcomes(
         ledger,
-        response,
+        physics,
         tapes_by_pair=tapes,
-        rf_risks_by_pair=risks,
         vlc_results_by_pair=vlc,
     )
 
@@ -236,7 +284,7 @@ def test_all_nine_actions_emit_contract_shaped_reward_cost_and_risk() -> None:
 
 def test_sampled_mechanisms_stop_at_first_success_but_keep_committed_reward() -> None:
     actions = (PolicyAction.RF_4, PolicyAction.VLC, PolicyAction.DUP_2)
-    ledger, response, tapes, risks, vlc = _inputs(actions, vlc_probability=0.4)
+    ledger, physics, tapes, risks, vlc = _inputs(actions, vlc_probability=0.4)
     tapes["pair-0"] = _fixed_tape(
         "pair-0",
         rf_draws=((1.0, 1.0, 1.0),),
@@ -257,9 +305,8 @@ def test_sampled_mechanisms_stop_at_first_success_but_keep_committed_reward() ->
 
     frame = assemble_frame_outcomes(
         ledger,
-        response,
+        physics,
         tapes_by_pair=tapes,
-        rf_risks_by_pair=risks,
         vlc_results_by_pair=vlc,
     )
     rf_four, vlc_only, dup_two = frame.pair_outcomes
@@ -280,7 +327,7 @@ def test_sampled_mechanisms_stop_at_first_success_but_keep_committed_reward() ->
 
 
 def test_geometric_vlc_failure_is_certain_even_at_uniform_endpoint() -> None:
-    ledger, response, tapes, risks, vlc = _inputs((PolicyAction.VLC,))
+    ledger, physics, tapes, risks, vlc = _inputs((PolicyAction.VLC,))
     tapes["pair-0"] = _fixed_tape(
         "pair-0",
         rf_draws=(),
@@ -301,9 +348,8 @@ def test_geometric_vlc_failure_is_certain_even_at_uniform_endpoint() -> None:
 
     frame = assemble_frame_outcomes(
         ledger,
-        response,
+        physics,
         tapes_by_pair=tapes,
-        rf_risks_by_pair=risks,
         vlc_results_by_pair=vlc,
     )
 
@@ -313,12 +359,11 @@ def test_geometric_vlc_failure_is_certain_even_at_uniform_endpoint() -> None:
 
 
 def test_step_info_retains_diagnostics_outside_actor_and_critic_tensors() -> None:
-    ledger, response, tapes, risks, vlc = _inputs((PolicyAction.DUP_1,))
+    ledger, physics, tapes, _, vlc = _inputs((PolicyAction.DUP_1,))
     frame = assemble_frame_outcomes(
         ledger,
-        response,
+        physics,
         tapes_by_pair=tapes,
-        rf_risks_by_pair=risks,
         vlc_results_by_pair=vlc,
     )
     info = frame.as_step_info()
@@ -327,14 +372,14 @@ def test_step_info_retains_diagnostics_outside_actor_and_critic_tensors() -> Non
     assert info["sampled_miss_cost"] is frame.sampled_miss_costs
     assert info["conditional_miss_probability"] is frame.conditional_miss_probabilities
     assert info["packet_outcomes"] is frame.pair_outcomes
-    assert info["rf_pool"] is response
+    assert info["local_rf_physics"] is physics
     with pytest.raises(TypeError):
         info["leak"] = True  # type: ignore[index]
 
     forbidden = {
         "sampled_miss_cost",
         "conditional_miss_probability",
-        "rf_pool_response",
+        "local_rf_physics",
         "pair_outcomes",
     }
     assert forbidden.isdisjoint(FrameObservation.__dataclass_fields__)
@@ -343,13 +388,12 @@ def test_step_info_retains_diagnostics_outside_actor_and_critic_tensors() -> Non
 
 
 def test_empty_frame_emits_zero_length_target_arrays() -> None:
-    ledger, response, tapes, risks, vlc = _inputs(())
+    ledger, physics, tapes, _, vlc = _inputs(())
 
     frame = assemble_frame_outcomes(
         ledger,
-        response,
+        physics,
         tapes_by_pair=tapes,
-        rf_risks_by_pair=risks,
         vlc_results_by_pair=vlc,
     )
 
@@ -361,25 +405,15 @@ def test_empty_frame_emits_zero_length_target_arrays() -> None:
 
 
 def test_outcome_assembly_rejects_incomplete_or_misaligned_inputs() -> None:
-    ledger, response, tapes, risks, vlc = _inputs(
+    ledger, physics, tapes, _, vlc = _inputs(
         (PolicyAction.VLC, PolicyAction.RF_1)
     )
 
     with pytest.raises(PacketOutcomeError, match="matched packet tapes"):
         assemble_frame_outcomes(
             ledger,
-            response,
+            physics,
             tapes_by_pair={"pair-0": tapes["pair-0"]},
-            rf_risks_by_pair=risks,
-            vlc_results_by_pair=vlc,
-        )
-
-    with pytest.raises(PacketOutcomeError, match="RF risks"):
-        assemble_frame_outcomes(
-            ledger,
-            response,
-            tapes_by_pair=tapes,
-            rf_risks_by_pair={**risks, "pair-0": risks["pair-1"]},
             vlc_results_by_pair=vlc,
         )
 
@@ -391,9 +425,8 @@ def test_outcome_assembly_rejects_incomplete_or_misaligned_inputs() -> None:
     with pytest.raises(PacketOutcomeError, match="tape identity"):
         assemble_frame_outcomes(
             ledger,
-            response,
+            physics,
             tapes_by_pair=wrong_tapes,
-            rf_risks_by_pair=risks,
             vlc_results_by_pair=vlc,
         )
 
@@ -410,23 +443,21 @@ def test_outcome_assembly_rejects_incomplete_or_misaligned_inputs() -> None:
     with pytest.raises(PacketOutcomeError, match="VLC sampled outcome"):
         assemble_frame_outcomes(
             ledger,
-            response,
+            physics,
             tapes_by_pair=tapes,
-            rf_risks_by_pair=risks,
             vlc_results_by_pair=inconsistent_vlc,
         )
 
 
-def test_outcome_assembly_rejects_pool_response_from_another_joint_action() -> None:
-    ledger, _, tapes, risks, vlc = _inputs((PolicyAction.RF_1,))
-    other_ledger, other_response, _, _, _ = _inputs((PolicyAction.RF_4,))
+def test_outcome_assembly_rejects_local_physics_from_another_joint_action() -> None:
+    ledger, _, tapes, _, vlc = _inputs((PolicyAction.RF_1,))
+    other_ledger, other_physics, _, _, _ = _inputs((PolicyAction.RF_4,))
     assert other_ledger.pair_ids == ledger.pair_ids
 
     with pytest.raises(PacketOutcomeError, match="does not belong"):
         assemble_frame_outcomes(
             ledger,
-            other_response,
+            other_physics,
             tapes_by_pair=tapes,
-            rf_risks_by_pair=risks,
             vlc_results_by_pair=vlc,
         )

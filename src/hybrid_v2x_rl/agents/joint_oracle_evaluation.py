@@ -1,4 +1,4 @@
-"""Frozen validation evaluation of the exact population-joint risk oracle."""
+"""Frozen validation evaluation of pair-local population-joint risk search."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from hybrid_v2x_rl.mean_field.joint_risk_oracle import (
     JOINT_RISK_ORACLE_METHOD,
     JointRiskOracleProblem,
     JointRiskOracleSolution,
-    solve_joint_risk_floor,
+    solve_pair_local_joint_risk,
 )
 from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizationState
 from hybrid_v2x_rl.mean_field.packet_outcomes import FramePacketOutcomes
@@ -45,7 +45,7 @@ from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
 from hybrid_v2x_rl.mean_field.state_regime_audit import STATE_REGIME_AUDIT_SCHEMA
 
 JOINT_ORACLE_EVALUATION_SCHEMA: Final = (
-    "hybrid-rf-vlc-rl.population-joint-risk-oracle-evaluation.v1"
+    "hybrid-rf-vlc-rl.pair-local-joint-risk-evaluation.v2"
 )
 _RISK_RECONCILIATION_TOLERANCE: Final = 2e-6
 
@@ -66,9 +66,12 @@ class _JointOracleTally:
     sampled_misses: int = 0
     activation_cost_sum: float = 0.0
     rf_attempts: int = 0
-    candidate_loads_total: int = 0
-    candidate_loads_evaluated: int = 0
-    candidate_loads_pruned: int = 0
+    certified_lower_bound_sum: float = 0.0
+    exact_frames: int = 0
+    assignment_space_size: int = 0
+    assignments_evaluated: int = 0
+    search_starts: int = 0
+    search_iterations: int = 0
     minimum_selected_load: int | None = None
     maximum_selected_load: int | None = None
     maximum_population: int = 0
@@ -96,7 +99,7 @@ class _JointOracleTally:
             abs_tol=_RISK_RECONCILIATION_TOLERANCE * len(solution.pair_ids),
         ):
             raise JointOracleEvaluationError(
-                "realized conditional risk differs from the exact joint solution"
+                "realized conditional risk differs from the pair-local joint solution"
             )
         actual_cost = -math.fsum(float(value) for value in outcomes.rewards.tolist())
         if not math.isclose(
@@ -106,7 +109,7 @@ class _JointOracleTally:
             abs_tol=1e-9,
         ):
             raise JointOracleEvaluationError(
-                "realized activation cost differs from the exact joint solution"
+                "realized activation cost differs from the pair-local joint solution"
             )
         self.frames += 1
         self.transitions += len(solution.pair_ids)
@@ -120,9 +123,12 @@ class _JointOracleTally:
         self.sampled_misses += int(outcomes.sampled_miss_costs.sum())
         self.activation_cost_sum += solution.total_activation_cost
         self.rf_attempts += solution.total_rf_attempts
-        self.candidate_loads_total += solution.candidate_loads_total
-        self.candidate_loads_evaluated += solution.candidate_loads_evaluated
-        self.candidate_loads_pruned += solution.candidate_loads_pruned
+        self.certified_lower_bound_sum += solution.certified_lower_bound
+        self.exact_frames += int(solution.optimality_proven)
+        self.assignment_space_size += solution.assignment_space_size
+        self.assignments_evaluated += solution.assignments_evaluated
+        self.search_starts += solution.search_starts
+        self.search_iterations += solution.search_iterations
         self.minimum_selected_load = (
             solution.total_rf_attempts
             if self.minimum_selected_load is None
@@ -152,9 +158,12 @@ class _JointOracleTally:
         self.sampled_misses += other.sampled_misses
         self.activation_cost_sum += other.activation_cost_sum
         self.rf_attempts += other.rf_attempts
-        self.candidate_loads_total += other.candidate_loads_total
-        self.candidate_loads_evaluated += other.candidate_loads_evaluated
-        self.candidate_loads_pruned += other.candidate_loads_pruned
+        self.certified_lower_bound_sum += other.certified_lower_bound_sum
+        self.exact_frames += other.exact_frames
+        self.assignment_space_size += other.assignment_space_size
+        self.assignments_evaluated += other.assignments_evaluated
+        self.search_starts += other.search_starts
+        self.search_iterations += other.search_iterations
         if other.minimum_selected_load is not None:
             self.minimum_selected_load = (
                 other.minimum_selected_load
@@ -176,21 +185,22 @@ class _JointOracleTally:
             raise JointOracleEvaluationError("joint oracle tally is empty")
         if self.usable_transitions + self.forced_fallback_transitions != self.transitions:
             raise JointOracleEvaluationError("joint oracle transition counts do not reconcile")
-        if (
-            self.candidate_loads_evaluated + self.candidate_loads_pruned
-            != self.candidate_loads_total
-        ):
-            raise JointOracleEvaluationError("joint oracle candidate counts do not reconcile")
         mean_risk = self.conditional_risk_sum / self.transitions
+        mean_lower_bound = self.certified_lower_bound_sum / self.transitions
         return {
             "density_vehicles_per_lane_km": density,
             "frames": self.frames,
             "transitions": self.transitions,
             "usable_transitions": self.usable_transitions,
             "forced_fallback_transitions": self.forced_fallback_transitions,
-            "mean_joint_oracle_conditional_miss_risk": mean_risk,
-            "joint_oracle_risk_budget_multiple": mean_risk / miss_budget,
-            "joint_oracle_mean_meets_budget": mean_risk <= miss_budget,
+            "mean_pair_local_candidate_conditional_miss_risk": mean_risk,
+            "pair_local_candidate_risk_budget_multiple": mean_risk / miss_budget,
+            "pair_local_candidate_mean_meets_budget": mean_risk <= miss_budget,
+            "mean_certified_conditional_miss_lower_bound": mean_lower_bound,
+            "certified_lower_bound_budget_multiple": mean_lower_bound / miss_budget,
+            "certified_lower_bound_exceeds_budget": mean_lower_bound > miss_budget,
+            "all_frames_optimality_proven": self.exact_frames == self.frames,
+            "exact_frames": self.exact_frames,
             "mean_usable_conditional_miss_risk": (
                 self.usable_conditional_risk_sum / self.usable_transitions
                 if self.usable_transitions
@@ -216,13 +226,11 @@ class _JointOracleTally:
                 "maximum": self.maximum_selected_load,
             },
             "maximum_population": self.maximum_population,
-            "candidate_loads": {
-                "total": self.candidate_loads_total,
-                "evaluated": self.candidate_loads_evaluated,
-                "pruned_by_monotone_lower_bound": self.candidate_loads_pruned,
-                "evaluated_fraction": (
-                    self.candidate_loads_evaluated / self.candidate_loads_total
-                ),
+            "joint_search": {
+                "assignment_space_size_sum": self.assignment_space_size,
+                "assignments_evaluated": self.assignments_evaluated,
+                "search_starts": self.search_starts,
+                "search_iterations": self.search_iterations,
             },
             "action_counts": {
                 name: self.action_counts[index]
@@ -238,7 +246,7 @@ class _JointOracleTally:
 @dataclass(slots=True)
 class _JointOraclePolicy:
     tallies: dict[float, _JointOracleTally] = field(default_factory=dict)
-    name: str = "exact-population-joint-risk-oracle"
+    name: str = "pair-local-population-joint-risk-search"
     requires_oracle_truth: bool = True
     _pending: dict[int, JointRiskOracleSolution] = field(default_factory=dict, init=False)
     _empty_pending: set[int] = field(default_factory=set, init=False)
@@ -261,7 +269,7 @@ class _JointOraclePolicy:
         if decision.population_size == 0:
             self._empty_pending.add(decision.frame.index)
             return ()
-        solution = solve_joint_risk_floor(
+        solution = solve_pair_local_joint_risk(
             JointRiskOracleProblem.from_decision(decision, channel_truth)
         )
         self._pending[decision.frame.index] = solution
@@ -327,20 +335,55 @@ class JointOracleEvaluationReport:
     generated_at_utc: datetime
 
     def as_dict(self) -> dict[str, object]:
-        all_pass = all(
-            row["joint_oracle_mean_meets_budget"] is True for row in self.densities
+        all_candidates_pass = all(
+            row["pair_local_candidate_mean_meets_budget"] is True
+            for row in self.densities
         )
+        any_lower_bound_fails = any(
+            row["certified_lower_bound_exceeds_budget"] is True
+            for row in self.densities
+        )
+        all_exact = all(
+            row["all_frames_optimality_proven"] is True
+            for row in self.densities
+        )
+        if all_candidates_pass:
+            verdict = "feasible-candidate-found"
+            next_action = (
+                "freeze the realizable pair-local candidate and proceed to the "
+                "predeclared system-feasibility frontier"
+            )
+        elif any_lower_bound_fails:
+            verdict = "infeasible-by-certified-lower-bound"
+            next_action = (
+                "revise the action/resource or physical system before further PPO training"
+            )
+        elif all_exact:
+            verdict = "infeasible-by-exact-search"
+            next_action = (
+                "revise the action/resource or physical system before further PPO training"
+            )
+        else:
+            verdict = "inconclusive-optimality-gap"
+            next_action = (
+                "tighten the pair-local joint-search certificate before drawing an "
+                "infeasibility conclusion"
+            )
         return {
             "schema": JOINT_ORACLE_EVALUATION_SCHEMA,
             "generated_at_utc": self.generated_at_utc.isoformat(),
-            "scope": "exact population-joint conditional-risk floor on frozen validation windows",
+            "scope": (
+                "certificate-aware pair-local population-joint risk evaluation "
+                "on frozen validation windows"
+            ),
             "test_split_opened": False,
             "non_deployable_oracle_truth": True,
             "optimization_method": JOINT_RISK_ORACLE_METHOD,
             "exactness_boundary": (
-                "exact for the current per-frame nine-action model because RF contention "
-                "depends only on aggregate offered attempts and fixed-load action risk has "
-                "diminishing marginal reductions"
+                "exhaustive and exact only when a frame's complete joint action "
+                "space is below the declared cap; larger overlapping-domain "
+                "frames return a realizable upper bound and a certified optimistic "
+                "lower bound"
             ),
             "policy_environment_scope_hash": self.policy_environment_scope_hash,
             "config_hash": self.config_hash,
@@ -362,14 +405,17 @@ class JointOracleEvaluationReport:
             "densities": list(self.densities),
             "campaign": self.campaign,
             "decision": {
-                "all_densities_meet_joint_oracle_floor": all_pass,
-                "coordination_aware_recovery_authorized": all_pass,
-                "standard_independent_ppo_recovery_authorized": False,
-                "next_action": (
-                    "design a coordination-aware learner and joint-oracle pretraining labels"
-                    if all_pass
-                    else "revise the action/resource or physical system before further PPO training"
+                "verdict": verdict,
+                "all_densities_have_feasible_realizable_candidate": (
+                    all_candidates_pass
                 ),
+                "any_density_infeasible_by_certified_lower_bound": (
+                    any_lower_bound_fails
+                ),
+                "all_frames_optimality_proven": all_exact,
+                "coordination_aware_recovery_authorized": all_candidates_pass,
+                "standard_independent_ppo_recovery_authorized": False,
+                "next_action": next_action,
             },
         }
 
@@ -416,7 +462,7 @@ def build_joint_oracle_evaluation(
     checkpoint_path: str | Path,
     state_regime_audit_path: str | Path,
 ) -> JointOracleEvaluationReport:
-    """Evaluate the exact joint risk floor on frozen validation windows only."""
+    """Evaluate pair-local joint candidates and certificates on validation only."""
 
     if not isinstance(config, ProjectConfig):
         raise JointOracleEvaluationError("joint oracle evaluation requires ProjectConfig")

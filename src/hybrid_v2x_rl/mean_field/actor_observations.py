@@ -35,7 +35,7 @@ from hybrid_v2x_rl.mean_field.congestion_feedback import (
     MeanFieldSignal,
 )
 from hybrid_v2x_rl.mean_field.frames import PopulationFrame
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolResponse
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import FrameLocalRFPhysics
 from hybrid_v2x_rl.observation.builder import ObservationBuilder
 
 
@@ -431,7 +431,7 @@ class CausalActorObservationAssembler:
 
     def close_frame(
         self,
-        response: RFPoolResponse,
+        local_rf_physics: FrameLocalRFPhysics,
         *,
         next_frame: PopulationFrame | None = None,
     ) -> CausalActorFrame | None:
@@ -457,17 +457,19 @@ class CausalActorObservationAssembler:
                 "every active pair requires outcome feedback before frame close",
                 context={"missing_pair_ids": missing},
             )
-        if not isinstance(response, RFPoolResponse):
-            raise CausalObservationError("frame close requires an RFPoolResponse")
-        response_ids = tuple(
-            pair_id for pair_id, _ in response.demand.reserved_rf_attempts_by_pair
-        )
-        if response_ids != frame.active_pair_ids:
+        if not isinstance(local_rf_physics, FrameLocalRFPhysics):
             raise CausalObservationError(
-                "RF-pool response IDs do not match the open population",
-                context={"actual": response_ids, "expected": frame.active_pair_ids},
+                "frame close requires pair-local RF physics"
             )
-        self.congestion.close_frame(response)
+        if local_rf_physics.pair_ids != frame.active_pair_ids:
+            raise CausalObservationError(
+                "pair-local RF physics IDs do not match the open population",
+                context={
+                    "actual": local_rf_physics.pair_ids,
+                    "expected": frame.active_pair_ids,
+                },
+            )
+        self.congestion.close_frame(local_rf_physics.responses)
         bootstrap_pairs = tuple(
             pair for pair in frame.pairs if pair.lifecycle.bootstrap_valid
         )

@@ -6,10 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from hybrid_v2x_rl.channels.rf.collision import SensitivityBand, headline_parameters
+from hybrid_v2x_rl.channels.rf.model import RFPropagationResult
 from hybrid_v2x_rl.config import load_headline_config
-from hybrid_v2x_rl.core.enums import Link
-from hybrid_v2x_rl.core.policy_actions import PolicyAction
+from hybrid_v2x_rl.core.enums import Link, RFPropagationState
+from hybrid_v2x_rl.core.policy_actions import (
+    ActionResourceMap,
+    PolicyAction,
+)
+from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.actor_observations import (
     CausalActorObservationAssembler,
     CausalObservationError,
@@ -24,7 +28,10 @@ from hybrid_v2x_rl.mean_field.frames import (
     PopulationFrame,
     PopulationPair,
 )
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel, RFPoolResponse
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import (
+    FrameLocalRFPhysics,
+    LocalRFPhysicsModel,
+)
 from hybrid_v2x_rl.mobility.trace_io import VehicleTraceRecord
 from hybrid_v2x_rl.observation.builder import (
     UNMEASURED_AGE_S,
@@ -118,23 +125,41 @@ def _frame(
     )
 
 
-def _response(frame: PopulationFrame, attempts: tuple[int, ...]) -> RFPoolResponse:
-    rows = tuple(zip(frame.active_pair_ids, attempts, strict=True))
-    demand = RFPoolDemand(
-        trace_id=frame.trace_id,
-        frame_index=frame.index,
-        time_s=frame.time_s,
-        active_pairs=len(rows),
-        reserved_rf_attempts_by_pair=rows,
-        offered_rf_attempts=sum(attempts),
-        rf_using_pairs=sum(value > 0 for value in attempts),
+def _response(frame: PopulationFrame, attempts: tuple[int, ...]) -> FrameLocalRFPhysics:
+    config = load_headline_config(PROJECT_ROOT)
+    actions = {
+        pair_id: PolicyAction.VLC if reserved == 0 else PolicyAction(reserved)
+        for pair_id, reserved in zip(
+            frame.active_pair_ids,
+            attempts,
+            strict=True,
+        )
+    }
+    ledger = FrameActionLedger.from_frame(
+        frame,
+        actions,
+        resource_map=ActionResourceMap.from_config(
+            config.environment,
+            config.cost,
+        ),
     )
-    model = RFPoolModel(
-        parameters=headline_parameters(),
-        sensitivity_band=SensitivityBand.NOMINAL,
-        attempt_airtime_s=0.0005,
+    model = LocalRFPhysicsModel.from_config(config)
+    propagation = {
+        pair_id: RFPropagationResult(
+            propagation_state=RFPropagationState.LOS,
+            pathloss_db=0.0,
+            shadowing_db=0.0,
+            fading_gain_linear=1.0,
+            sinr_db=0.0,
+            decoding_failure_probability=0.0,
+        )
+        for pair_id in frame.active_pair_ids
+    }
+    return model.evaluate(
+        model.context_for(frame),
+        ledger,
+        propagation_by_pair=propagation,
     )
-    return model.evaluate(demand, sensed_fraction=1.0)
 
 
 class _PerceptionDouble:

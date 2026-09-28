@@ -2,22 +2,28 @@
 
 ## Status and authority
 
-- Contract version: `1.0.0`
+- Document revision: `1.1.0`
+- Action/tensor artifact contract: `environment.contract_version = 1.0.0`
+- Pair-local RF pipeline contract: `1.0.0`
 - Project configuration schema: `1.1`
-- Status: frozen for Phases 2–6
+- Status: frozen through the pair-local RF rollout migration
 - Scope: the synthetic Manhattan trace experiment at densities 10, 20, and
   30 vehicles per lane-kilometer
 - Freeze configuration SHA-256:
   `69254a26b691629163f9a404777d0e0d0188867caff2f964c52b647f430e8531`
-- Freeze validation: 815 tests passed, 26 expected artifact-dependent tests
-  skipped, Ruff passed, and strict mypy passed across 73 source files
+- Version `1.0.0` freeze validation: 815 tests passed, 26 expected
+  artifact-dependent tests skipped, Ruff passed, and strict mypy passed across
+  73 source files. Version `1.1.0` migration evidence is recorded in
+  `PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.
 
-This document is the normative Phase 1 contract for the population-coupled RL
+This document is the normative environment contract for the population-coupled RL
 environment. The layered YAML configuration supplies numerical values; this
 document fixes their meaning, ordering, timing, shapes, and causal boundary. A
 change to an action index, tensor column, reward, constraint, lifecycle rule,
-or information source requires a new contract version. Editorial clarification
-that changes no behavior may retain version `1.0.0`.
+or information source requires a new document revision. The action/tensor
+artifact version remains `1.0.0` because action indices and tensor columns did
+not change; the pair-local physics boundary has its own independently checked
+contract version.
 
 The inherited `RF`/`VLC`/`DUP` packet lifecycle is validated foundation code,
 not the new environment interface. In particular,
@@ -38,10 +44,11 @@ flows. Vehicles not serving as an endpoint of an active pair still affect
 occlusion, tracking, and the causal neighbor-count proxy, but they generate no
 packet in this service pool. If one physical vehicle is the receiver of one
 active pair and the transmitter of another, the two pair flows remain separate
-agents and both reservations are counted. RF half-duplex remains the declared
-statistical channel abstraction rather than an exact per-vehicle schedule.
-Phase 2 must report endpoint-overlap counts so this limitation is measurable;
-changing to a disjoint matching would define a different experiment.
+agents and both reservations are counted. RF half-duplex uses the exact
+current transmit duty cycle implied by the selected reservations at the focal
+physical receiver. Attempt timing relative to that duty cycle remains the
+declared analytical statistical abstraction rather than a realized NR slot
+schedule. Changing to a disjoint matching would define a different experiment.
 
 For density group \(\rho\in\{10,20,30\}\), the reporting objective is
 
@@ -82,8 +89,9 @@ Each frame is processed in this exact order:
 4. Produce every active policy action from the same pre-action frame state.
 5. Validate action masks and substitute the declared fallback only for pairs
    without a usable causal observation.
-6. Aggregate all selected RF reservations into current offered demand.
-7. Recompute current RF-pool utilization and collision risk.
+6. Project all selected RF reservations into every 200 m pair-local domain.
+7. Recompute pair-local utilization, geometric sensing, collision risk, and
+   endpoint half-duplex exposure.
 8. Evaluate RF/VLC outcomes with matched packet randomness.
 9. Assign resource reward, binary miss cost, and conditional-risk diagnostic.
 10. Update per-link quality feedback and the delayed population signal.
@@ -136,18 +144,31 @@ demand and reward even if decoding succeeds before the last reserved attempt.
 An implementation may stop simulating later attempts after success, but it may
 not return those already reserved resources to the same frame.
 
-For `N_t` active agents and joint action vector `a_t`, current frame demand is
+For `N_t` active agents and joint action vector `a_t`, the aggregate committed
+attempt count retained for resource accounting and delayed feedback is
 
 ```text
 D_t = sum(i=1..N_t) n_rf(a_t[i])       # unit: reserved RF attempts/frame
 ```
 
-The Phase 4 pool model consumes `D_t` and the configured RF sensitivity band.
-It must expose unclipped offered load for diagnostics, clipped CBR for measured
-feedback, and per-attempt collision probability. Under fixed channel
-conditions, increasing `D_t` must never reduce collision probability. The
-analytical model and its uncertainty bands remain identified as such; they are
-not to be described as a calibrated NR Mode-2 simulator.
+`D_t` is not a physical global collision pool. For focal pair `i`, let `M_i,t`
+be the active service flows whose physical transmitters lie within the
+inclusive 200 m transmitter-centered domain. Physical local demand is
+
+```text
+D_i,t = sum(j in M_i,t) n_rf(a_t[j])
+```
+
+Every selected reservation is retained once in the authoritative action
+ledger and can appear in multiple overlapping domain views. Those views are
+not additive. The local response exposes unclipped focal-domain utilization,
+clipped CBR, attempt-weighted geometric sensing, and external per-attempt
+collision probability. Only external physical transmitters contribute random
+collision contenders; co-located service flows are serialized by endpoint.
+Under fixed membership and sensing conditions, increasing external local
+demand must never reduce focal collision probability. The analytical model and
+its uncertainty bands remain identified as such; they are not to be described
+as a calibrated NR Mode-2 simulator.
 
 The headline mask contains all nine actions. An action is masked only when a
 medium is administratively or physically absent from the hardware profile. A
@@ -205,10 +226,10 @@ validity flag.
 
 At environment reset, `m_0 = [0, 0]`; zero load is not confused with missing
 history. After an observed empty frame, the next signal is `[0, 1]` because an
-empty pool is a valid measurement. A pair born after reset receives the same
-valid delayed population signal as every other agent in that frame. The signal
-is reset at a trace or sampled episode boundary because the preceding actions
-outside that rollout are unknown.
+empty response set is a valid measurement. A pair born after reset receives
+the same valid delayed population signal as every other agent in that frame.
+The signal is reset at a trace or sampled episode boundary because the
+preceding actions outside that rollout are unknown.
 
 The actor receives no current action histogram, current `D_t`, future load, or
 same-frame CBR. The two-column signal is the only population aggregate exposed
@@ -464,9 +485,11 @@ Phases 2–5 must enforce and test all of the following before training:
 1. Exactly one stable row per active pair and no duplicate pair ID per frame.
 2. All actor/critic values finite after normalization.
 3. Every probability in `[0,1]`; every selected action unmasked and in `[0,8]`.
-4. Sum of per-agent reserved attempts equals `D_t`; VLC contributes zero.
+4. Sum of per-agent reserved attempts equals `D_t`; every local-domain load
+   exactly conserves the ledger rows in its membership; VLC contributes zero.
 5. Population cost equals the sum of the action-table costs.
-6. Current collision risk is nondecreasing in `D_t` under fixed channel state.
+6. Current focal collision risk is nondecreasing in external local demand under
+   fixed domain membership, geometry, sensing band, and channel state.
 7. Current actions cannot appear in their own observations or mean-field input.
 8. No observation imports exact future trace state or exact occlusion truth.
 9. Link feedback refreshes only media used by the selected action.
@@ -484,7 +507,8 @@ checked across consecutive frames rather than only row by row.
 
 | Contract quantity | Configuration source |
 |---|---|
-| Contract/action version and order | `environment.contract_version`, `environment.actions` |
+| Action/tensor version and order | `environment.contract_version`, `environment.actions` |
+| Pair-local RF physics version | `LOCAL_RF_PIPELINE_CONTRACT_VERSION` |
 | Maximum RF attempts | `environment.max_rf_attempts` |
 | Missing-observation fallback | `environment.no_observation_fallback_action` |
 | Mean-field delay/reset semantics | `environment.mean_field` |
@@ -511,10 +535,12 @@ boundary is:
 - Phase 2 supplies chronological population frames and lifecycle metadata.
 - Phase 3 supplies the authoritative nine-action type, resource ledger, and
   legacy-action replacement.
-- Phase 4 supplies the action-coupled pool response consuming `D_t`.
+- Phase 4 supplies action-coupled pair-local topology, sensing, response,
+  endpoint schedule, and attempt-risk contracts consuming each `D_i,t`.
 - Phase 5 supplies the frame API, actor/critic tensors, normalization, delayed
   mean-field state, and lifecycle masks.
 
-Until those gates pass, the repository can validate and describe contract
-`1.0.0`, but it must not label a rollout as a compliant mean-field RL
-environment.
+The atomic integration of those gates is documented in
+`PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`. A rollout is document revision `1.1.0`
+compliant only when packet outcomes and delayed feedback retain the same
+selected ledger and `FrameLocalRFPhysics`.

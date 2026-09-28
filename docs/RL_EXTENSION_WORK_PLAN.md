@@ -702,7 +702,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      200 m domain. The global-oracle result is therefore retained as a code-
      model result but superseded as a physical feasibility gate. See
      `PHASE8_RF_CONTENTION_DOMAIN_AUDIT.md`.
-   - [ ] Specify and implement pair-local RF contention with spatial reuse,
+   - [x] Specify and implement pair-local RF contention with spatial reuse,
      pair-specific pool responses, geometry-aware sensing, endpoint-correct
      half-duplex accounting, and conservation across shared endpoints. Then
      rerun baselines and a feasibility oracle appropriate for overlapping
@@ -713,8 +713,8 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        selected RF reservations conserve exactly inside each overlapping
        domain; distant actions cannot change focal demand; and distinct flows
        sharing one transmitter remain distinct ledger reservations. This
-       boundary is tested but intentionally not wired into rollout until the
-       remaining pair-specific physics can migrate atomically. See
+       boundary is tested and is now wired through the authoritative atomic
+       rollout assembler. See
        `PAIR_LOCAL_RF_CONTENTION_CONTRACT_V1.md`.
      - [x] Add pair-local geometric sensing visibility and a pair-specific
        sensed-fraction boundary without exposing simulator truth to the actor.
@@ -722,7 +722,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        shared-transmitter flows remain distinct but locally known; and external
        sensed fractions are weighted by exact selected RF attempts, with a
        neutral value only when external demand is zero. The boundary is tested
-       but not wired into rollout. See
+       and live through the atomic rollout assembler. See
        `PAIR_LOCAL_RF_SENSING_CONTRACT_V1.md`.
      - [x] Produce pair-specific RF collision/CBR responses from local demand
        and prove load monotonicity and limiting cases in every declared band.
@@ -731,7 +731,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        load combines building-hidden attempts with declared sensing failures;
        the response preserves overload after CBR saturation and is tested over
        every integer external load from 0 through 800 in all three bands. It is
-       not yet wired into rollout. See
+       live through the atomic rollout assembler. See
        `PAIR_LOCAL_RF_RESPONSE_CONTRACT_V1.md`.
      - [x] Replace population-mean half-duplex risk with endpoint-specific
        physical transmit activity while conserving multiple service flows.
@@ -739,7 +739,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        canonical serialized order; shared-transmitter flows remain distinct;
        inbound traffic does not create transmit activity; and each focal flow
        receives the exact current duty cycle of its physical receiver. Endpoint
-       overload remains explicit. The boundary is not wired into rollout. See
+       overload remains explicit. The boundary is live in rollout. See
        `ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md`.
      - [x] Compose pair-specific RF attempt risk from local collision,
        receiver-specific half-duplex exposure, and propagation without changing
@@ -749,16 +749,29 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        analytical access and total-failure equations. It neither samples an
        outcome nor accepts or advances a random tape, so the identity-addressed
        v1 tape and its four RF draws remain unchanged. The boundary is tested
-       but not wired into rollout. See
+       and live in rollout. See
        `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md`.
-     - [ ] Migrate packet outcomes, delayed feedback, baselines, and the
-       feasibility oracle atomically to the pair-local response contract.
+     - [x] Migrate packet outcomes, delayed feedback, baselines, and the
+       feasibility oracle atomically to the pair-local response contract. One
+       shared `LocalRFPhysicsModel` now assembles topology, geometric sensing,
+       action-coupled load, pair responses, endpoint schedules, and attempt
+       risks for rollout and counterfactual consumers. The feasibility
+       evaluator exhaustively proves small joint spaces and returns a
+       realizable candidate plus a certified optimistic lower bound for larger
+       spaces, so an open optimality gap is reported as inconclusive rather
+       than false infeasibility. See `PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.
+       Pre-migration PPO checkpoints are analysis-only and must not be resumed
+       for optimization; any later learner starts fresh after the corrected
+       feasibility gate passes.
    - [ ] Predeclare and execute a bounded system-feasibility frontier around
-     the exact joint oracle. Vary explicit RF capacity, declared sensing band,
+     the certificate-aware pair-local joint evaluator. Vary explicit RF
+     capacity, declared sensing band,
      named optical configuration, and fallback handling; identify the smallest
      scientifically defensible system change that passes `1e-4` at every
      density before authorizing another learner or policy seed. This task is
-     blocked until the local-contention repair establishes a valid oracle.
+     now unblocked by the completed atomic local-contention migration. Exact
+     feasibility claims require exhaustive completion; otherwise the frontier
+     must retain the candidate/lower-bound optimality gap.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1058,21 +1071,29 @@ domain. The median global/local active-flow ratio is 6.55 and 84.74% of pooled
 flows lie outside the focal domain. The global-oracle result remains correct
 for the implemented code but is superseded as a physical feasibility gate. No
 further PPO recovery arm or capacity frontier is authorized yet. Pair-local RF
-contention contract v1 now freezes and implements the action-independent 200 m
-topology plus exactly conserved action-coupled local demand. Pair-local sensing
-contract v1 now adds deterministic Manhattan building visibility and an exact
-attempt-weighted external sensed fraction while preserving actor information
-boundaries. Pair-local RF response contract v1 now maps every local domain to
-its own utilization, CBR, effective hidden load, and analytical collision
-probability, with limiting cases and adjacent-load monotonicity established in
-every sensing band. None of these isolated boundaries partially changes
-rollout physics. Endpoint RF schedule contract v1 now assigns all selected
-attempts exactly once to physical transmitters, serializes shared-transmitter
-flows without merging them, and replaces population-mean half-duplex exposure
-with the focal receiver's current transmit duty cycle. Pair-local RF
-attempt-risk contract v1 now combines each focal collision response, exact
-receiver duty cycle, and propagation row into independently auditable access
-and total per-attempt probabilities. It does not consume randomness or alter
-the matched-tape schema. The immediate next task is the atomic migration of
-packet outcomes, delayed feedback, baselines, and the feasibility oracle to
-the completed pair-local boundaries. The corrected feasibility gate follows.
+contention contract v1 freezes the action-independent 200 m topology plus
+exactly conserved action-coupled local demand. Pair-local sensing contract v1
+adds deterministic Manhattan building visibility and an exact attempt-weighted
+external sensed fraction while preserving actor information boundaries.
+Pair-local RF response contract v1 maps every local domain to its own
+utilization, CBR, effective hidden load, and analytical collision probability,
+with limiting cases and adjacent-load monotonicity established in every sensing
+band. Endpoint RF schedule contract v1 assigns all selected attempts exactly
+once to physical transmitters, serializes shared-transmitter flows without
+merging them, and replaces population-mean half-duplex exposure with the focal
+receiver's current transmit duty cycle. Pair-local RF attempt-risk contract v1
+combines each focal collision response, exact receiver duty cycle, and
+propagation row into independently auditable access and total per-attempt
+probabilities without consuming randomness or altering the matched-tape
+schema. The atomic migration is now complete: one authoritative assembler
+drives packet outcomes, one-frame-delayed aggregate feedback, analytical
+baselines, state-regime counterfactuals, and the population-joint feasibility
+evaluation. The old global RF-pool module remains only for historical contract
+tests and archived analyses; it is no longer in the live rollout path. Because
+overlapping local domains destroy the former scalar-load separability, the
+corrected feasibility evaluator is exact only when it exhausts the declared
+joint space. Larger frames publish a realizable candidate, a certified
+zero-contention lower bound, and the remaining optimality gap. The immediate
+next task is to predeclare and execute the bounded pair-local system-feasibility
+frontier; no PPO training is authorized until that gate yields a feasible
+candidate or a scientifically justified system revision.

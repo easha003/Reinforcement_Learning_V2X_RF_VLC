@@ -21,7 +21,10 @@ from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
 from hybrid_v2x_rl.mean_field.actor_observations import CausalActorFrame
 from hybrid_v2x_rl.mean_field.environment_api import FrameObservation
 from hybrid_v2x_rl.mean_field.frames import PopulationFrame
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolModel
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import (
+    FrameLocalRFContext,
+    LocalRFPhysicsModel,
+)
 
 PolicyProposal: TypeAlias = PolicyAction | None
 OracleChannelTruth: TypeAlias = Mapping[str, PairChannelEvaluation]
@@ -40,7 +43,8 @@ class PopulationPolicyFrame:
     observation: FrameObservation
     action_space: MaskedActionSpace
     resource_map: ActionResourceMap
-    pool_model: RFPoolModel
+    local_rf_model: LocalRFPhysicsModel
+    local_rf_context: FrameLocalRFContext
     miss_budget: float
 
     def __post_init__(self) -> None:
@@ -62,6 +66,17 @@ class PopulationPolicyFrame:
             abs_tol=1e-9,
         ):
             raise PopulationPolicyError("policy inputs must share one decision time")
+        if not isinstance(self.local_rf_model, LocalRFPhysicsModel):
+            raise PopulationPolicyError(
+                "policy frame requires the pair-local RF physics model"
+            )
+        if (
+            not isinstance(self.local_rf_context, FrameLocalRFContext)
+            or self.local_rf_context.frame != self.frame
+        ):
+            raise PopulationPolicyError(
+                "policy frame requires pair-local context for the same population"
+            )
         if not 0.0 < self.miss_budget < 1.0:
             raise PopulationPolicyError("policy miss_budget must lie in (0, 1)")
 

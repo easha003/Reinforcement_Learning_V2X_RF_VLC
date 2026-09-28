@@ -30,7 +30,6 @@ from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import (
     POLICY_ACTION_ORDER,
     PolicyAction,
-    action_resources,
 )
 from hybrid_v2x_rl.mean_field.deterministic_rollout import run_policy_rollout_with_state
 from hybrid_v2x_rl.mean_field.environment_api import FrameObservation
@@ -601,10 +600,6 @@ class _FrozenPPORegimePolicy:
                     observation_usable=actor_row.usable,
                 )
             )
-        total_rf_attempts = sum(
-            action_resources(action).reserved_rf_attempts for action in effective_actions
-        )
-
         pending: dict[str, _PendingRow] = {}
         for index in usable_indices:
             pair = decision.frame.pairs[index]
@@ -616,18 +611,25 @@ class _FrozenPPORegimePolicy:
             truth = channel_truth[pair.pair_id]
             rf_failure = truth.rf_propagation.decoding_failure_probability
             vlc_failure = truth.vlc_result.total_failure_probability
-            own_attempts = action_resources(selected_action).reserved_rf_attempts
             induced = assess_counterfactual_actions_at_load(
                 decision,
+                pair_id=pair.pair_id,
                 rf_decoding_failure_probability=rf_failure,
                 vlc_failure_probability=vlc_failure,
-                other_pair_rf_attempts=total_rf_attempts - own_attempts,
+                other_actions_by_pair={
+                    candidate_pair.pair_id: effective_actions[candidate_index]
+                    for candidate_index, candidate_pair in enumerate(
+                        decision.frame.pairs
+                    )
+                    if candidate_pair.pair_id != pair.pair_id
+                },
             )
             assessments: dict[str, CounterfactualActionSet] = {
                 POLICY_INDUCED_LOAD: induced,
                 **{
                     name: assess_counterfactual_actions(
                         decision,
+                        pair_id=pair.pair_id,
                         rf_decoding_failure_probability=rf_failure,
                         vlc_failure_probability=vlc_failure,
                         load_profile=name,

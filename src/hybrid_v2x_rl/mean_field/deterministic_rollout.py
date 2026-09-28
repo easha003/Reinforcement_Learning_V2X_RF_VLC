@@ -2,7 +2,7 @@
 
 This is deliberately not a training environment.  It composes the real trace
 reader, causal observation boundary, action masks, joint-action accounting,
-shared RF pool, matched packet tapes, physical channels, packet outcomes, and
+pair-local RF physics, matched packet tapes, physical channels, packet outcomes, and
 pair lifecycle masks so long runs can fail fast before PPO is introduced.
 
 Unusable causal rows never reach a policy.  The train-only normalizer produces
@@ -41,6 +41,7 @@ from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
 from hybrid_v2x_rl.mean_field.environment_api import FrameObservation
 from hybrid_v2x_rl.mean_field.frames import FrameTraceSource, PopulationFrameReader
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import LocalRFPhysicsModel
 from hybrid_v2x_rl.mean_field.normalization import (
     ObservationNormalizationState,
     ObservationNormalizer,
@@ -56,7 +57,6 @@ from hybrid_v2x_rl.mean_field.policy_interface import (
 )
 from hybrid_v2x_rl.mean_field.random_tape import MATCHED_TAPE_SCHEMA
 from hybrid_v2x_rl.mean_field.return_boundaries import FrameReturnBoundary
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 from hybrid_v2x_rl.mean_field.seeding import EnvironmentSeedState
 
 POLICY_RANDOM: Final = "random"
@@ -539,16 +539,15 @@ def run_policy_rollout_with_state(
         config,
         start_frame_index=start_frame_index,
     )
+    local_rf_model = LocalRFPhysicsModel.from_config(
+        config,
+        sensitivity_band=SensitivityBand.NOMINAL,
+    )
     physical = build_rollout(
         config,
-        buildings=(),
+        buildings=local_rf_model.buildings,
         root_seed=seed_state.active_root_seed,
         band=SensitivityBand.NOMINAL,
-    )
-    pool_model = RFPoolModel(
-        parameters=physical.lifecycle.rf.collision,
-        sensitivity_band=SensitivityBand.NOMINAL,
-        attempt_airtime_s=config.rf.timing.airtime_s,
     )
     reader = PopulationFrameReader(
         source,
@@ -633,6 +632,7 @@ def run_policy_rollout_with_state(
         except StopIteration:
             next_frame = None
         actor_frame = actor_assembler.begin_frame(frame)
+        local_rf_context = local_rf_model.context_for(frame)
         normalized_frame = normalizer.begin_frame(frame, actor_frame)
         observation = normalized_frame.observation
         tapes = randomness.packet_tapes(frame)
@@ -668,7 +668,8 @@ def run_policy_rollout_with_state(
             observation=observation,
             action_space=action_space,
             resource_map=resource_map,
-            pool_model=pool_model,
+            local_rf_model=local_rf_model,
+            local_rf_context=local_rf_context,
             miss_budget=config.service.miss_budget,
         )
         visible_truth: OracleChannelTruth | None = None
@@ -702,17 +703,14 @@ def run_policy_rollout_with_state(
             actions_by_pair,
             resource_map=resource_map,
         )
-        demand = RFPoolDemand.from_ledger(ledger)
-        pool_response = pool_model.evaluate(demand)
-        rf_risks = {
-            row.pair_id: pool_model.combine_attempt_risk(
-                pool_response,
-                pair_id=row.pair_id,
-                propagation=channel_evaluations[row.pair_id].rf_propagation,
-            )
-            for row in ledger.pair_accounting
-            if row.uses_rf
-        }
+        local_rf_physics = local_rf_model.evaluate(
+            local_rf_context,
+            ledger,
+            propagation_by_pair={
+                pair_id: evaluation.rf_propagation
+                for pair_id, evaluation in channel_evaluations.items()
+            },
+        )
         vlc_results = {
             row.pair_id: channel_evaluations[row.pair_id].vlc_result
             for row in ledger.pair_accounting
@@ -720,9 +718,8 @@ def run_policy_rollout_with_state(
         }
         outcomes = assemble_frame_outcomes(
             ledger,
-            pool_response,
+            local_rf_physics,
             tapes_by_pair=tapes,
-            rf_risks_by_pair=rf_risks,
             vlc_results_by_pair=vlc_results,
         )
         boundary = FrameReturnBoundary.from_frame(ledger, actor_frame)
@@ -768,7 +765,7 @@ def run_policy_rollout_with_state(
             per_action[int(outcome.action)] += 1
             action_counts[int(outcome.action)] += 1
         final_actor_frame = actor_assembler.close_frame(
-            pool_response,
+            local_rf_physics,
             next_frame=next_frame,
         )
         final_observation: dict[str, FrameObservation] = {}
@@ -841,9 +838,11 @@ def run_policy_rollout_with_state(
         max_population = max(max_population, population)
         max_pool_utilization = max(
             max_pool_utilization,
-            pool_response.pool_utilization,
+            local_rf_physics.max_local_pool_utilization,
         )
-        pool_utilization_terms.append(pool_response.pool_utilization)
+        pool_utilization_terms.append(
+            local_rf_physics.mean_local_pool_utilization
+        )
 
         _fingerprint_update(
             digest,
@@ -857,11 +856,20 @@ def run_policy_rollout_with_state(
                 ],
                 "normalization_count_before": list(normalized_frame.statistics_count_before),
                 "actions": [action.label for action in proposals],
-                "pool": {
-                    "offered_rf_attempts": demand.offered_rf_attempts,
-                    "pool_utilization": pool_response.pool_utilization,
-                    "channel_busy_ratio": pool_response.channel_busy_ratio,
-                    "collision_probability": (pool_response.per_attempt_collision_probability),
+                "local_rf": {
+                    "total_reserved_rf_attempts": (
+                        ledger.total_reserved_rf_attempts
+                    ),
+                    "mean_local_pool_utilization": (
+                        local_rf_physics.mean_local_pool_utilization
+                    ),
+                    "max_local_pool_utilization": (
+                        local_rf_physics.max_local_pool_utilization
+                    ),
+                    "pair_responses": [
+                        response.as_dict()
+                        for response in local_rf_physics.responses.responses
+                    ],
                 },
                 "outcomes": [row.as_dict() for row in outcomes.pair_outcomes],
                 "lifecycle": {

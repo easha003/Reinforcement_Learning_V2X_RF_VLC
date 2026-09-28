@@ -1,5 +1,10 @@
 # Phase 5 reward and reliability targets
 
+> Historical contract note (2026-09-27): the reward and matched-tape semantics
+> remain active, but the global RF-pool response described below has been
+> superseded by pair-local collision, endpoint half-duplex, and attempt-risk
+> assembly. See `PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.
+
 ## Scope
 
 `mean_field.packet_outcomes` is the single boundary that converts a complete

@@ -14,6 +14,16 @@ from hybrid_v2x_rl.mean_field.congestion_feedback import (
     ActorObservationSchema,
     DelayedCongestionFeedback,
 )
+from hybrid_v2x_rl.mean_field.local_rf_response import (
+    FrameLocalRFResponses,
+    LocalRFResponseModel,
+)
+from hybrid_v2x_rl.mean_field.local_rf_sensing import (
+    LOCAL_RF_SENSING_CONTRACT_VERSION,
+    FrameLocalRFSensedLoads,
+    LocalRFSensingReservation,
+    PairLocalRFSensedLoad,
+)
 from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 from hybrid_v2x_rl.observation.builder import ObservationBuilder
 
@@ -84,6 +94,55 @@ def _feedback() -> DelayedCongestionFeedback:
     )
 
 
+def _local_responses(regime: LoadRegime) -> FrameLocalRFResponses:
+    """Represent the same per-actor reservations at the live feedback boundary."""
+
+    demand = _demand(regime)
+    rows = tuple(
+        PairLocalRFSensedLoad(
+            focal_pair_id=pair_id,
+            focal_transmitter_id=f"tx-{pair_id}",
+            reservations=(
+                LocalRFSensingReservation(
+                    pair_id=pair_id,
+                    transmitter_id=f"tx-{pair_id}",
+                    reserved_rf_attempts=attempts,
+                    focal_flow=True,
+                    colocated_with_focal_transmitter=True,
+                    geometrically_decodable=True,
+                ),
+            ),
+            local_offered_rf_attempts=attempts,
+            focal_rf_attempts=attempts,
+            colocated_other_rf_attempts=0,
+            external_contending_rf_attempts=0,
+            geometrically_sensed_external_rf_attempts=0,
+            geometrically_hidden_external_rf_attempts=0,
+            sensed_fraction=1.0,
+        )
+        for pair_id, attempts in demand.reserved_rf_attempts_by_pair
+    )
+    config = load_headline_config(PROJECT_ROOT)
+    collision = build_rf_channel(
+        config,
+        band=SensitivityBand.NOMINAL,
+    ).collision
+    return LocalRFResponseModel(
+        parameters=collision,
+        sensitivity_band=SensitivityBand.NOMINAL,
+        attempt_airtime_s=config.rf.timing.airtime_s,
+    ).evaluate(
+        FrameLocalRFSensedLoads(
+            contract_version=LOCAL_RF_SENSING_CONTRACT_VERSION,
+            trace_id=TRACE_ID,
+            frame_index=0,
+            time_s=0.0,
+            pair_ids=tuple(pair_id for pair_id, _ in demand.reserved_rf_attempts_by_pair),
+            rows=rows,
+        )
+    )
+
+
 def _actor_schema() -> ActorObservationSchema:
     config = load_headline_config(PROJECT_ROOT)
     return ActorObservationSchema(
@@ -128,7 +187,7 @@ def test_named_load_regimes_have_auditable_pool_and_delayed_responses(
     feedback.reset(TRACE_ID)
     feedback.begin_frame(TRACE_ID, 0)
     assert feedback.actor_observation(schema, local)[-2:] == (0.0, 0.0)
-    feedback.close_frame(response)
+    feedback.close_frame(_local_responses(regime))
 
     delayed = feedback.begin_frame(TRACE_ID, 1)
     actor = feedback.actor_observation(schema, local)

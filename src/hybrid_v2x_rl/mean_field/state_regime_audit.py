@@ -28,9 +28,10 @@ from typing import Final, Literal, cast
 
 import numpy as np
 
-from hybrid_v2x_rl.channels.rf.collision import SensitivityBand
+from hybrid_v2x_rl.channels.rf.model import RFPropagationResult
 from hybrid_v2x_rl.config.hashing import config_hash, scope_hash
 from hybrid_v2x_rl.config.models import ProjectConfig
+from hybrid_v2x_rl.core.enums import RFPropagationState
 from hybrid_v2x_rl.core.errors import HybridV2XError
 from hybrid_v2x_rl.core.policy_actions import (
     POLICY_ACTION_ORDER,
@@ -38,7 +39,6 @@ from hybrid_v2x_rl.core.policy_actions import (
     PolicyAction,
     action_resources,
 )
-from hybrid_v2x_rl.env.assembly import build_rollout
 from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.action_masks import MaskedActionSpace
 from hybrid_v2x_rl.mean_field.actor_observations import (
@@ -52,13 +52,13 @@ from hybrid_v2x_rl.mean_field.frames import (
     PopulationFrameReader,
     TraceCatalog,
 )
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import LocalRFPhysicsModel
 from hybrid_v2x_rl.mean_field.normalization import ObservationNormalizationState
 from hybrid_v2x_rl.mean_field.policy_interface import (
     OracleChannelTruth,
     PolicyProposal,
     PopulationPolicyFrame,
 )
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel
 
 STATE_REGIME_AUDIT_SCHEMA: Final = "hybrid-rf-vlc-rl.state-regime-audit.v3"
 
@@ -396,6 +396,7 @@ class CounterfactualActionSet:
 def assess_counterfactual_actions(
     decision: PopulationPolicyFrame,
     *,
+    pair_id: str,
     rf_decoding_failure_probability: float,
     vlc_failure_probability: float,
     load_profile: LoadProfileName,
@@ -408,11 +409,21 @@ def assess_counterfactual_actions(
         other_attempts = LOAD_PROFILES[load_profile]
     except KeyError as error:
         raise StateRegimeAuditError("unknown RF-load profile") from error
+    other_action = (
+        PolicyAction.VLC
+        if other_attempts == 0
+        else PolicyAction(other_attempts)
+    )
     return assess_counterfactual_actions_at_load(
         decision,
+        pair_id=pair_id,
         rf_decoding_failure_probability=rf_decoding_failure_probability,
         vlc_failure_probability=vlc_failure_probability,
-        other_pair_rf_attempts=other_attempts * (decision.population_size - 1),
+        other_actions_by_pair={
+            candidate_id: other_action
+            for candidate_id in decision.frame.active_pair_ids
+            if candidate_id != pair_id
+        },
         load_label=load_profile,
     )
 
@@ -420,38 +431,69 @@ def assess_counterfactual_actions(
 def assess_counterfactual_actions_at_load(
     decision: PopulationPolicyFrame,
     *,
+    pair_id: str,
     rf_decoding_failure_probability: float,
     vlc_failure_probability: float,
-    other_pair_rf_attempts: int,
+    other_actions_by_pair: Mapping[str, PolicyAction],
     load_label: str = "policy_induced_load",
 ) -> CounterfactualActionSet:
-    """Evaluate focal actions while holding the exact other-pair RF load fixed."""
+    """Evaluate focal actions while holding exact other-pair actions fixed."""
 
     _probability("rf_decoding_failure_probability", rf_decoding_failure_probability)
     _probability("vlc_failure_probability", vlc_failure_probability)
-    if (
-        not isinstance(other_pair_rf_attempts, int)
-        or isinstance(other_pair_rf_attempts, bool)
-        or other_pair_rf_attempts < 0
-    ):
-        raise StateRegimeAuditError("other_pair_rf_attempts must be non-negative")
     if not isinstance(load_label, str) or not load_label.strip():
         raise StateRegimeAuditError("counterfactual load label must be non-empty")
     population = decision.population_size
     if population < 1:
         raise StateRegimeAuditError("counterfactual action audit requires a nonempty frame")
+    if pair_id not in decision.frame.active_pair_ids:
+        raise StateRegimeAuditError("counterfactual focal pair is absent")
+    expected_other_ids = set(decision.frame.active_pair_ids) - {pair_id}
+    if set(other_actions_by_pair) != expected_other_ids or any(
+        type(action) is not PolicyAction
+        or action not in decision.action_space.mask.allowed_actions
+        for action in other_actions_by_pair.values()
+    ):
+        raise StateRegimeAuditError(
+            "counterfactual other actions must cover the remaining population"
+        )
+
+    propagation = {
+        candidate_id: RFPropagationResult(
+            propagation_state=RFPropagationState.LOS,
+            pathloss_db=0.0,
+            shadowing_db=0.0,
+            fading_gain_linear=1.0,
+            sinr_db=0.0,
+            decoding_failure_probability=rf_decoding_failure_probability,
+        )
+        for candidate_id in decision.frame.active_pair_ids
+    }
+    other_pair_rf_attempts = sum(
+        action_resources(action).reserved_rf_attempts
+        for action in other_actions_by_pair.values()
+    )
 
     rows: list[CounterfactualAction] = []
     for action in decision.action_space.mask.allowed_actions:
         spec = action_resources(action)
+        actions = dict(other_actions_by_pair)
+        actions[pair_id] = action
+        ledger = FrameActionLedger.from_frame(
+            decision.frame,
+            actions,
+            resource_map=decision.resource_map,
+        )
+        physics = decision.local_rf_model.evaluate(
+            decision.local_rf_context,
+            ledger,
+            propagation_by_pair=propagation,
+        )
         risk = 1.0
         if spec.uses_rf:
-            offered = other_pair_rf_attempts + spec.reserved_rf_attempts
-            per_attempt = decision.pool_model.counterfactual_attempt_failure_probability(
-                active_pairs=population,
-                offered_rf_attempts=offered,
-                decoding_failure_probability=rf_decoding_failure_probability,
-            )
+            per_attempt = physics.attempt_risks.risk_for(
+                pair_id
+            ).total_failure_probability
             risk *= per_attempt**spec.reserved_rf_attempts
         if spec.uses_vlc:
             risk *= vlc_failure_probability
@@ -561,6 +603,7 @@ class CoverageAccumulator:
         assessments = {
             name: assess_counterfactual_actions(
                 decision,
+                pair_id=pair_id,
                 rf_decoding_failure_probability=rf_decoding_failure_probability,
                 vlc_failure_probability=vlc_failure_probability,
                 load_profile=name,
@@ -836,20 +879,6 @@ def _window_starts(
     return tuple(sorted(set(int(round(value)) for value in raw)))
 
 
-def _pool_model(config: ProjectConfig, *, root_seed: int) -> RFPoolModel:
-    physical = build_rollout(
-        config,
-        buildings=(),
-        root_seed=root_seed,
-        band=SensitivityBand.NOMINAL,
-    )
-    return RFPoolModel(
-        parameters=physical.lifecycle.rf.collision,
-        sensitivity_band=SensitivityBand.NOMINAL,
-        attempt_airtime_s=config.rf.timing.airtime_s,
-    )
-
-
 def _collect_threshold_window(
     config: ProjectConfig,
     source: FrameTraceSource,
@@ -876,7 +905,7 @@ def _collect_threshold_window(
     assembler.reset(source.trace_id, start_frame_index=start_frame_index)
     action_space = MaskedActionSpace.from_config(config.environment, config.rf, config.vlc)
     resource_map = ActionResourceMap.from_config(config.environment, config.cost)
-    pool = _pool_model(config, root_seed=root_seed)
+    local_rf_model = LocalRFPhysicsModel.from_config(config)
     iterator = iter(
         reader.iter_frames(
             start_frame_index=start_frame_index,
@@ -908,8 +937,24 @@ def _collect_threshold_window(
                 delivered=True,
             )
         ledger = FrameActionLedger.from_frame(frame, actions, resource_map=resource_map)
-        response = pool.evaluate(RFPoolDemand.from_ledger(ledger))
-        assembler.close_frame(response, next_frame=next_frame)
+        context = local_rf_model.context_for(frame)
+        propagation = {
+            pair_id: RFPropagationResult(
+                propagation_state=RFPropagationState.LOS,
+                pathloss_db=0.0,
+                shadowing_db=0.0,
+                fading_gain_linear=1.0,
+                sinr_db=0.0,
+                decoding_failure_probability=0.0,
+            )
+            for pair_id in frame.active_pair_ids
+        }
+        physics = local_rf_model.evaluate(
+            context,
+            ledger,
+            propagation_by_pair=propagation,
+        )
+        assembler.close_frame(physics, next_frame=next_frame)
         frame = next_frame
         processed += 1
 

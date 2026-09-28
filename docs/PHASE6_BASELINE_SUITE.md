@@ -1,5 +1,11 @@
 # Phase 6 baseline suite
 
+> Migration note (2026-09-27): realized baseline outcomes and analytical
+> allocation now use the shared pair-local RF pipeline. References below to a
+> single `RFPoolDemand`/`RFPoolModel` describe the historical Phase 6
+> implementation. The centralized model-based allocators now evaluate complete
+> pair-local joint ledgers; see `PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.
+
 ## Purpose
 
 This suite establishes the comparison boundary that PPO must beat. A baseline

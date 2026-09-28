@@ -1,8 +1,8 @@
 """Pair-aligned reward, sampled miss, and conditional-risk outcomes.
 
-This is the Phase 5 boundary at which an action ledger, the current shared
-RF-pool response, selected-link channel evaluations, and one matched packet
-tape per active pair become training targets.  Resource reward remains an
+This is the Phase 5 boundary at which an action ledger, the current pair-local
+RF physics, selected-link channel evaluations, and one matched packet tape per
+active pair become training targets.  Resource reward remains an
 action-accounting quantity: every reserved RF attempt and VLC activation is
 charged even when a packet succeeds early.  Reliability is represented twice:
 
@@ -38,12 +38,9 @@ from hybrid_v2x_rl.mean_field.action_ledger import (
     FrameActionLedger,
     PairResourceAccounting,
 )
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import FrameLocalRFPhysics
+from hybrid_v2x_rl.mean_field.local_rf_risk import PairLocalRFAttemptRisk
 from hybrid_v2x_rl.mean_field.random_tape import MatchedPacketTape
-from hybrid_v2x_rl.mean_field.rf_pool import (
-    RFAttemptRisk,
-    RFPoolDemand,
-    RFPoolResponse,
-)
 
 OutcomeArray: TypeAlias = NDArray[np.float32]
 OutcomeInfo: TypeAlias = Mapping[str, object]
@@ -159,7 +156,7 @@ class PairPacketOutcome:
     rf_delivered: bool
     vlc_delivered: bool
     rf_attempts: tuple[RFAttemptOutcome, ...]
-    rf_attempt_risk: RFAttemptRisk | None
+    rf_attempt_risk: PairLocalRFAttemptRisk | None
     rf_packet_miss_probability: float | None
     vlc_result: VLCChannelResult | None
     vlc_miss_probability: float | None
@@ -191,10 +188,19 @@ class PairPacketOutcome:
 
         spec = action_resources(self.action)
         if spec.uses_rf:
-            if not isinstance(self.rf_attempt_risk, RFAttemptRisk) or not _is_probability(
-                self.rf_packet_miss_probability
-            ):
+            if not isinstance(
+                self.rf_attempt_risk,
+                PairLocalRFAttemptRisk,
+            ) or not _is_probability(self.rf_packet_miss_probability):
                 raise PacketOutcomeError("an RF action requires RF risk diagnostics")
+            if (
+                self.rf_attempt_risk.pair_id != self.pair_id
+                or self.rf_attempt_risk.reserved_rf_attempts
+                != spec.reserved_rf_attempts
+            ):
+                raise PacketOutcomeError(
+                    "RF risk identity or reservation differs from the selected action"
+                )
             if not self.rf_attempts or len(self.rf_attempts) > spec.reserved_rf_attempts:
                 raise PacketOutcomeError(
                     "RF evaluated-attempt count must lie within the reservation"
@@ -333,7 +339,7 @@ class FramePacketOutcomes:
     sampled_miss_costs: OutcomeArray
     conditional_miss_probabilities: OutcomeArray
     pair_outcomes: tuple[PairPacketOutcome, ...]
-    rf_pool_response: RFPoolResponse
+    local_rf_physics: FrameLocalRFPhysics
 
     def __post_init__(self) -> None:
         if not isinstance(self.trace_id, str) or not self.trace_id.strip():
@@ -352,8 +358,25 @@ class FramePacketOutcomes:
             raise PacketOutcomeError("pair_ids must be unique and canonically ordered")
         if tuple(row.pair_id for row in self.pair_outcomes) != self.pair_ids:
             raise PacketOutcomeError("pair outcome rows do not align with pair_ids")
-        if not isinstance(self.rf_pool_response, RFPoolResponse):
-            raise PacketOutcomeError("frame outcomes require the current RF-pool response")
+        if not isinstance(self.local_rf_physics, FrameLocalRFPhysics):
+            raise PacketOutcomeError(
+                "frame outcomes require current pair-local RF physics"
+            )
+        physics_frame = self.local_rf_physics.context.frame
+        if (
+            physics_frame.trace_id != self.trace_id
+            or physics_frame.index != self.frame_index
+            or not math.isclose(
+                physics_frame.time_s,
+                self.time_s,
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            )
+            or self.local_rf_physics.pair_ids != self.pair_ids
+        ):
+            raise PacketOutcomeError(
+                "pair-local RF physics does not belong to the outcome frame"
+            )
 
         population = len(self.pair_ids)
         expected_arrays = {
@@ -407,7 +430,7 @@ class FramePacketOutcomes:
                 "sampled_miss_cost": self.sampled_miss_costs,
                 "conditional_miss_probability": self.conditional_miss_probabilities,
                 "packet_outcomes": self.pair_outcomes,
-                "rf_pool": self.rf_pool_response,
+                "local_rf_physics": self.local_rf_physics,
             }
         )
 
@@ -416,7 +439,7 @@ def _evaluate_rf_attempt(
     *,
     attempt_index: int,
     tape: MatchedPacketTape,
-    risk: RFAttemptRisk,
+    risk: PairLocalRFAttemptRisk,
 ) -> RFAttemptOutcome:
     draws = tape.rf_attempts[attempt_index]
     half_duplex_failure = draws.half_duplex_draw < risk.half_duplex_probability
@@ -505,7 +528,7 @@ def _assemble_pair_outcome(
     *,
     accounting: PairResourceAccounting,
     tape: MatchedPacketTape,
-    rf_risk: RFAttemptRisk | None,
+    rf_risk: PairLocalRFAttemptRisk | None,
     vlc_result: VLCChannelResult | None,
 ) -> PairPacketOutcome:
     spec = action_resources(accounting.action)
@@ -577,22 +600,22 @@ def _assemble_pair_outcome(
 
 def assemble_frame_outcomes(
     ledger: FrameActionLedger,
-    pool_response: RFPoolResponse,
+    local_rf_physics: FrameLocalRFPhysics,
     *,
     tapes_by_pair: Mapping[str, MatchedPacketTape],
-    rf_risks_by_pair: Mapping[str, RFAttemptRisk],
     vlc_results_by_pair: Mapping[str, VLCChannelResult],
 ) -> FramePacketOutcomes:
     """Build aligned CMDP targets from selected-action simulator evaluations."""
 
     if not isinstance(ledger, FrameActionLedger):
         raise PacketOutcomeError("outcome assembly requires a FrameActionLedger")
-    if not isinstance(pool_response, RFPoolResponse):
-        raise PacketOutcomeError("outcome assembly requires an RFPoolResponse")
-    expected_demand = RFPoolDemand.from_ledger(ledger)
-    if pool_response.demand != expected_demand:
+    if not isinstance(local_rf_physics, FrameLocalRFPhysics):
         raise PacketOutcomeError(
-            "RF-pool response does not belong to the action ledger's frame"
+            "outcome assembly requires pair-local RF physics"
+        )
+    if local_rf_physics.ledger != ledger:
+        raise PacketOutcomeError(
+            "pair-local RF physics does not belong to the selected action ledger"
         )
 
     accounting = ledger.pair_accounting
@@ -600,8 +623,11 @@ def assemble_frame_outcomes(
     rf_pair_ids = tuple(row.pair_id for row in accounting if row.uses_rf)
     vlc_pair_ids = tuple(row.pair_id for row in accounting if row.uses_vlc)
     _validate_exact_keys(tapes_by_pair, pair_ids, name="matched packet tapes")
-    _validate_exact_keys(rf_risks_by_pair, rf_pair_ids, name="RF risks")
     _validate_exact_keys(vlc_results_by_pair, vlc_pair_ids, name="VLC results")
+    if local_rf_physics.attempt_risks.rf_pair_ids != rf_pair_ids:
+        raise PacketOutcomeError(
+            "pair-local RF risks do not cover the selected RF actions exactly"
+        )
 
     outcomes: list[PairPacketOutcome] = []
     for row in accounting:
@@ -632,18 +658,11 @@ def assemble_frame_outcomes(
             )
         tape.view_for_action(row.action)
 
-        rf_risk = rf_risks_by_pair.get(row.pair_id)
-        if rf_risk is not None:
-            if not isinstance(rf_risk, RFAttemptRisk):
-                raise PacketOutcomeError(
-                    "RF risks mapping contains an invalid row",
-                    context={"pair_id": row.pair_id},
-                )
-            if rf_risk.pair_id != row.pair_id or rf_risk.pool_response != pool_response:
-                raise PacketOutcomeError(
-                    "RF risk does not belong to its pair and current pool response",
-                    context={"pair_id": row.pair_id},
-                )
+        rf_risk = (
+            local_rf_physics.attempt_risks.risk_for(row.pair_id)
+            if row.uses_rf
+            else None
+        )
 
         vlc_result = vlc_results_by_pair.get(row.pair_id)
         outcomes.append(
@@ -669,7 +688,7 @@ def assemble_frame_outcomes(
             tuple(row.conditional_miss_probability for row in outcome_rows)
         ),
         pair_outcomes=outcome_rows,
-        rf_pool_response=pool_response,
+        local_rf_physics=local_rf_physics,
     )
 
 

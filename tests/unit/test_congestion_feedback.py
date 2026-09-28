@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from hybrid_v2x_rl.channels.rf.collision import SensitivityBand, headline_parameters
 from hybrid_v2x_rl.config import load_headline_config
+from hybrid_v2x_rl.core.policy_actions import ActionResourceMap, PolicyAction
+from hybrid_v2x_rl.mean_field.action_ledger import FrameActionLedger
 from hybrid_v2x_rl.mean_field.congestion_feedback import (
     MEAN_FIELD_COLUMNS,
     ActorObservationSchema,
@@ -16,20 +17,22 @@ from hybrid_v2x_rl.mean_field.congestion_feedback import (
     DelayedCongestionFeedback,
     MeanFieldSignal,
 )
-from hybrid_v2x_rl.mean_field.rf_pool import RFPoolDemand, RFPoolModel, RFPoolResponse
+from hybrid_v2x_rl.mean_field.frames import (
+    FrameTraceSource,
+    PairLifecycle,
+    PopulationFrame,
+    PopulationPair,
+)
+from hybrid_v2x_rl.mean_field.local_rf_domain import FrameLocalRFLoads
+from hybrid_v2x_rl.mean_field.local_rf_pipeline import LocalRFPhysicsModel
+from hybrid_v2x_rl.mean_field.local_rf_response import FrameLocalRFResponses
+from hybrid_v2x_rl.mean_field.local_rf_sensing import FrameLocalRFSensedLoads
+from hybrid_v2x_rl.mobility.trace_io import VehicleTraceRecord
 from hybrid_v2x_rl.observation.builder import ObservationBuilder
 
 TRACE_ID = "synthetic-d20-train-000"
 OTHER_TRACE_ID = "synthetic-d20-train-001"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _pool_model() -> RFPoolModel:
-    return RFPoolModel(
-        parameters=headline_parameters(),
-        sensitivity_band=SensitivityBand.NOMINAL,
-        attempt_airtime_s=0.0005,
-    )
 
 
 def _response(
@@ -38,21 +41,82 @@ def _response(
     *,
     trace_id: str = TRACE_ID,
     sensed_fraction: float = 1.0,
-) -> RFPoolResponse:
-    rows = tuple(
-        (f"pair-{index:03d}", reserved)
-        for index, reserved in enumerate(attempts)
+) -> FrameLocalRFResponses:
+    if sensed_fraction != 1.0:
+        # Sensing reliability is now fixed by the declared model rather than
+        # injected into delayed-feedback tests.
+        assert 0.0 <= sensed_fraction <= 1.0
+    time_s = 0.1 * frame_index
+    vehicles: list[VehicleTraceRecord] = []
+    pairs: list[PopulationPair] = []
+    actions: dict[str, PolicyAction] = {}
+    for index, reserved in enumerate(attempts):
+        pair_id = f"pair-{index:03d}"
+        transmitter = VehicleTraceRecord(
+            trace_id=trace_id,
+            time_s=time_s,
+            vehicle_id=f"tx-{index:03d}",
+            x_m=float(index * 20),
+            y_m=0.0,
+            heading_rad=0.0,
+            speed_mps=0.0,
+            acceleration_mps2=0.0,
+            length_m=4.5,
+            width_m=1.8,
+            height_m=1.5,
+            lane_id="edge-0_0",
+            edge_id="edge-0",
+            route_id="route-0",
+            vehicle_type="passenger",
+        )
+        receiver = replace(
+            transmitter,
+            vehicle_id=f"rx-{index:03d}",
+            x_m=float(index * 20 + 10),
+        )
+        vehicles.extend((transmitter, receiver))
+        pairs.append(
+            PopulationPair(
+                pair_id=pair_id,
+                episode_step=frame_index,
+                transmitter=transmitter,
+                receiver=receiver,
+                lifecycle=PairLifecycle(born=frame_index == 0),
+            )
+        )
+        actions[pair_id] = (
+            PolicyAction.VLC if reserved == 0 else PolicyAction(reserved)
+        )
+    frame = PopulationFrame(
+        source=FrameTraceSource(
+            path=Path(trace_id),
+            trace_id=trace_id,
+            split="train",
+            density=20.0,
+            replicate=0,
+        ),
+        index=frame_index,
+        time_s=time_s,
+        vehicles=tuple(sorted(vehicles, key=lambda row: row.vehicle_id)),
+        pairs=tuple(pairs),
     )
-    demand = RFPoolDemand(
-        trace_id=trace_id,
-        frame_index=frame_index,
-        time_s=0.1 * frame_index,
-        active_pairs=len(rows),
-        reserved_rf_attempts_by_pair=rows,
-        offered_rf_attempts=sum(attempts),
-        rf_using_pairs=sum(attempt > 0 for attempt in attempts),
+    config = load_headline_config(PROJECT_ROOT)
+    model = LocalRFPhysicsModel.from_config(config)
+    context = model.context_for(frame)
+    ledger = FrameActionLedger.from_frame(
+        frame,
+        actions,
+        resource_map=ActionResourceMap.from_config(
+            config.environment,
+            config.cost,
+        ),
     )
-    return _pool_model().evaluate(demand, sensed_fraction=sensed_fraction)
+    loads = FrameLocalRFLoads.from_topology_and_ledger(context.topology, ledger)
+    sensed = FrameLocalRFSensedLoads.from_sensing_and_loads(
+        context.sensing,
+        loads,
+    )
+    return model.response_model.evaluate(sensed)
 
 
 def _feedback() -> DelayedCongestionFeedback:
@@ -169,9 +233,10 @@ def test_same_frame_cbr_and_collision_never_enter_the_delayed_suffix() -> None:
 
     assert actor_before_actions[local_cbr_index] == pytest.approx(0.71)
     assert actor_before_actions[-2:] == pytest.approx((0.5, 1.0))
-    assert current_response.channel_busy_ratio != actor_before_actions[-2]
+    current_pair_response = current_response.response_for("pair-000")
+    assert current_pair_response.channel_busy_ratio != actor_before_actions[-2]
     assert (
-        current_response.per_attempt_collision_probability
+        current_pair_response.per_attempt_collision_probability
         != actor_before_actions[-2]
     )
 

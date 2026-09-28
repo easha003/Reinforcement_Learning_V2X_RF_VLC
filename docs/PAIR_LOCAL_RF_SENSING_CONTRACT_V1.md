@@ -1,7 +1,6 @@
 # Pair-local RF sensing contract v1
 
-Status: frozen migration boundary; implemented and tested; not yet wired into
-rollout
+Status: frozen, implemented, tested, and live in the atomic rollout path
 
 Date frozen: 2026-09-27
 
@@ -14,9 +13,8 @@ focal domain and hidden behind a building from another.
 
 This contract converts the pair-local topology into deterministic geometric
 visibility and then weights that visibility by selected RF attempts. The
-companion `PAIR_LOCAL_RF_RESPONSE_CONTRACT_V1.md` now consumes this boundary,
-but the live rollout is unchanged until the full pair-specific physical path
-can migrate atomically.
+companion `PAIR_LOCAL_RF_RESPONSE_CONTRACT_V1.md` consumes this boundary, and
+the completed atomic assembler now carries it through the live rollout.
 
 ## Geometry and information boundary
 
@@ -95,7 +93,7 @@ focal flow's own retries or co-located service flows as independent random
 contenders. If `r_sense` is the declared decoding reliability for the active
 sensitivity band, the expected sensed share passed into that model is
 `r_sense * s_i,t`; the complementary external share is hidden. Its
-monotonicity and limiting cases are tested before rollout integration.
+monotonicity and limiting cases are tested in the integrated contract.
 
 This document does not define endpoint serialization. Co-located attempts are
 kept separate so `ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md` can serialize and
@@ -114,3 +112,7 @@ Unit tests cover the complete 55-block headline layout, deterministic geometry
 identity, building-hidden and building-clear edges, shared transmitters,
 attempt rather than flow weighting, zero-external-load semantics, the
 no-building limit, empty frames, and mismatched-frame rejection.
+
+The action-independent sensing context is materialized once per frame and
+reused without mutation by realized and counterfactual action ledgers. See
+`PAIR_LOCAL_ROLLOUT_MIGRATION_V1.md`.

@@ -1,7 +1,6 @@
 # Pair-local RF response contract v1
 
-Status: frozen migration boundary; implemented and tested; not yet wired into
-rollout
+Status: frozen, implemented, tested, and live in the atomic rollout path
 
 Date frozen: 2026-09-27
 
@@ -13,12 +12,11 @@ replaces the invalid assumption that all active Manhattan-frame flows share one
 global response, while retaining the declared analytical collision model with
 sensitivity bands.
 
-The implementation is deliberately isolated. The companion
+The implementation is integrated through one shared assembler. The companion
 `ENDPOINT_RF_SCHEDULE_CONTRACT_V1.md` supplies receiver-specific half-duplex
 exposure, and `PAIR_LOCAL_RF_RISK_CONTRACT_V1.md` now composes both inputs with
-RF propagation without sampling. The live rollout continues to use the global
-response until packet outcomes, delayed feedback, baselines, and the
-feasibility oracle can migrate atomically.
+RF propagation without sampling. Packet outcomes, delayed feedback, baselines,
+and feasibility evaluation now consume the same pair-local response path.
 
 ## Occupancy response
 
@@ -122,6 +120,6 @@ is canonical, and inconsistent models or derived fields fail closed.
 - `FrameLocalRFResponses`, a pair-aligned response set bound to the trace,
   frame, sensing contract, and sensitivity band.
 
-The actor observation remains unchanged. These are simulator-truth physical
-responses and diagnostics until the later feedback migration defines what
-delayed aggregate is causally observable.
+The actor observation remains unchanged. The live causal signal is still the
+one-frame-delayed mean RF-attempt fraction, now computed from the pair-local
+response set; current per-pair simulator truth remains diagnostic only.
