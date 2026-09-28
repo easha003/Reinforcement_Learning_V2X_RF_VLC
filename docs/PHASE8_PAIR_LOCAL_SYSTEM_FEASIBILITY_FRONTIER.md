@@ -1,11 +1,12 @@
 # Phase 8 pair-local system-feasibility frontier
 
-Status: protocol and executor implemented; structural dry run passed; full
-frontier result not yet executed
+Status: complete; all 36 cells certified infeasible; training not authorized
 
 Date frozen: 2026-09-27
 
 Executor completed: 2026-09-28
+
+Frontier executed: 2026-09-28
 
 ## Decision this protocol will support
 
@@ -174,13 +175,100 @@ The artifact-backed dry run passed on 2026-09-28. It verified:
 This dry run evaluated no channel frame and therefore produced no feasibility
 answer.
 
+## Full execution evidence
+
+The opt-in CPU execution completed all 36 cells and wrote:
+
+`artifacts/evaluations/phase8_pair_local_system_feasibility_frontier.json`
+
+Result SHA-256:
+`b5d44445b5a7c61cdb9d178793f26fc6a39ca75e84e7d4406f2963f9bf138944`
+
+The final artifact validates the frozen declaration and source hashes, marks
+the frontier complete, and records the following fail-closed outcomes:
+
+| Evidence level | Infeasible | Feasible | Inconclusive |
+|---|---:|---:|---:|
+| Density evaluations | 108 | 0 | 0 |
+| Evaluation cells | 36 | 0 | 0 |
+| Actual `DUP-4` contract cells | 18 | 0 | 0 |
+| All-rows diagnostic cells | 18 | 0 | 0 |
+| Physical designs | 6 | 0 | 0 |
+
+The current-system nominal and robust verdicts are both `infeasible`. The
+robust-feasible and Pareto-minimal design lists are empty. Training is not
+authorized, and the test split was not opened.
+
+### Current-system control
+
+For the unchanged 2-subchannel, wide-60-degree, nominal-sensing,
+actual-`DUP-4` system:
+
+| Density (vehicles/lane-km) | Realizable candidate risk | Certified lower bound | Lower-bound / budget |
+|---:|---:|---:|---:|
+| 10 | `2.901441e-3` | `2.403681e-4` | `2.40x` |
+| 20 | `2.773961e-2` | `9.552398e-4` | `9.55x` |
+| 30 | `3.827212e-2` | `7.013525e-4` | `7.01x` |
+
+The failed control is therefore not an artifact of PPO behavior: even its
+optimistic certified floor exceeds `1e-4` at every density.
+
+### Effect of the bounded physical changes
+
+Added RF capacity and the concentrated optical receiver substantially reduce
+the best realizable risk, but they do not cross the target. The nominal
+actual-contract candidates are:
+
+| RF pool | Optical receiver | d10 candidate | d20 candidate | d30 candidate | Verdict |
+|---|---|---:|---:|---:|---|
+| 2 subchannels | wide 60 deg | `2.901441e-3` | `2.773961e-2` | `3.827212e-2` | infeasible |
+| 2 subchannels | concentrated 30 deg | `2.322190e-3` | `2.258730e-2` | `2.876072e-2` | infeasible |
+| 4 subchannels | wide 60 deg | `5.236172e-4` | `5.994590e-3` | `1.091183e-2` | infeasible |
+| 4 subchannels | concentrated 30 deg | `4.629647e-4` | `5.094968e-3` | `8.234037e-3` | infeasible |
+| 8 subchannels | wide 60 deg | `2.619144e-4` | `1.373642e-3` | `1.889953e-3` | infeasible |
+| 8 subchannels | concentrated 30 deg | `2.553347e-4` | `1.260855e-3` | `1.502506e-3` | infeasible |
+
+The best actual-contract candidates anywhere in the grid occur at 8
+subchannels, the concentrated receiver, and optimistic sensing. They are
+`2.536417e-4`, `1.229059e-3`, and `1.430628e-3` at densities 10, 20, and 30.
+Even this non-robust best case misses the target by `2.54x`, `12.29x`, and
+`14.31x`, respectively.
+
+### Why the result is a feasibility conclusion
+
+The diagnostic view removes forced fallback and permits oracle control of all
+rows. Its certified zero-contention, zero-half-duplex lower bounds are
+invariant across all 18 physical points:
+
+| Density (vehicles/lane-km) | Diagnostic certified lower bound | Budget multiple |
+|---:|---:|---:|
+| 10 | `2.271923e-4` | `2.27x` |
+| 20 | `6.895343e-4` | `6.90x` |
+| 30 | `3.897709e-4` | `3.90x` |
+
+These bounds exceed the target before RF contention, receiver half duplex, or
+forced fallback can add risk. Consequently, incomplete enumeration of large
+joint action spaces cannot change the verdict: every density is certified
+infeasible, and no open candidate/lower-bound gap remains.
+
 ## What has and has not been learned
 
-This document contains no frontier result. It does not show that `1e-4` is
-feasible, infeasible, or learnable. It freezes the hypotheses, evidence,
-interventions, exactness rules, and decision rule before seeing the answers.
+The declared bounded system is infeasible at `1e-4` on the frozen validation
+windows. Increasing the shared RF pool from 2 to 8 subchannels, varying the
+declared sensing band, concentrating the optical receiver from 60 to 30
+degrees, and removing the forced-fallback limitation are insufficient. More
+PPO training, different PPO hyperparameters, or additional policy seeds cannot
+overcome the certified floor under these physical assumptions.
 
-The immediate next task is the full CPU-heavy execution of all 36 frozen
-cells. It requires the explicit `--execute` flag. During that run, Codex checks
-progress at the project's requested one-hour interval. No PPO training begins
-unless the completed artifact's robust gate authorizes it.
+This is not a claim that hybrid RF/VLC reliability at `1e-4` is universally
+impossible. It is a scoped result for the current trace evidence, propagation
+models, action contract, and frozen intervention grid. It is also not final
+test-set statistical evidence; the held-out test split remains unopened.
+
+The immediate next task is to quantify the per-link reliability improvement
+needed to move the diagnostic floor below `1e-4`, then predeclare a bounded
+architecture-level frontier containing mechanisms that can produce that
+improvement. Candidate mechanisms must alter RF link reliability or add
+genuinely independent optical/RF diversity; capacity, sensing, or PPO-only
+changes are not sufficient. No PPO training begins unless an actual-contract
+design passes the robust validation gate.

@@ -763,7 +763,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        Pre-migration PPO checkpoints are analysis-only and must not be resumed
        for optimization; any later learner starts fresh after the corrected
        feasibility gate passes.
-   - [ ] Predeclare and execute a bounded system-feasibility frontier around
+   - [x] Predeclare and execute a bounded system-feasibility frontier around
      the certificate-aware pair-local joint evaluator. Vary explicit RF
      capacity, declared sensing band,
      named optical configuration, and fallback handling; identify the smallest
@@ -772,6 +772,11 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
      now unblocked by the completed atomic local-contention migration. Exact
      feasibility claims require exhaustive completion; otherwise the frontier
      must retain the candidate/lower-bound optimality gap.
+     The full frozen frontier completed on 2026-09-28. All 36 cells and all
+     108 density-level evaluations are certified infeasible; no cell is merely
+     inconclusive. There is no robust-feasible or Pareto-minimal design in the
+     declared grid, the test split remains closed, and a new learner is not
+     authorized. See `PHASE8_PAIR_LOCAL_SYSTEM_FEASIBILITY_FRONTIER.md`.
      - [x] Freeze the validation windows, 18-point physical grid, two fallback
        views, certificate-aware verdict hierarchy, robust training gate, and
        Pareto-minimal change rule before observing any frontier result. The
@@ -783,9 +788,21 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        configurations, every effective RF capacity/sensing combination, and
        exactly 36 ordered cells without evaluating a channel frame. Execution
        is opt-in through `--execute`; the default CLI remains dry-run only.
-     - [ ] Execute all 36 predeclared evaluation cells, retain every open
+     - [x] Execute all 36 predeclared evaluation cells, retain every open
        candidate/lower-bound gap, and apply the frozen training-authorization
-       rule before starting any new policy seed.
+       rule before starting any new policy seed. The resumable CPU execution
+       completed every cell without opening the test split. All 36 cell
+       verdicts are infeasible, the robust training gate failed, and training
+       remains blocked. The diagnostic all-rows lower bounds are
+       `2.271923e-4`, `6.895343e-4`, and `3.897709e-4` at densities 10, 20,
+       and 30, respectively, so the next intervention must change per-link or
+       architecture-level reliability rather than PPO hyperparameters.
+   - [ ] Predeclare an architecture-level reliability frontier that changes a
+     mechanism capable of lowering the certified propagation floor. Quantify
+     the required per-link improvement first; then bound physically
+     interpretable RF-link and/or optical-diversity interventions. Keep PPO
+     training and the test split blocked until a realizable actual-contract
+     design passes `1e-4` at every validation density.
 5. [x] Apply the reliability curriculum:
 
    ```text
