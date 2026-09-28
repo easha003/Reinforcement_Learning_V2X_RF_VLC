@@ -267,9 +267,9 @@ def test_analytical_access_risk_reuses_ledger_boundary_and_handles_zero_load() -
     ),
     [
         (0, 0.0, 0.0, 0, False),
-        (1, 1.0 / 400.0, 1.0 / 400.0, 0, False),
-        (400, 1.0, 1.0, 399, False),
-        (800, 2.0, 1.0, 799, True),
+        (1, 1.0 / 200.0, 1.0 / 200.0, 0, False),
+        (200, 1.0, 1.0, 199, False),
+        (400, 2.0, 1.0, 399, True),
     ],
 )
 def test_pool_response_separates_unclipped_utilization_from_clipped_cbr(
@@ -283,11 +283,11 @@ def test_pool_response_separates_unclipped_utilization_from_clipped_cbr(
         _demand_with_total_attempts(offered_rf_attempts)
     )
 
-    assert response.candidate_resources == 400
+    assert response.candidate_resources == 200
     assert response.offered_airtime_s == pytest.approx(
         offered_rf_attempts * 0.0005
     )
-    assert response.pool_capacity_airtime_s == pytest.approx(0.2)
+    assert response.pool_capacity_airtime_s == pytest.approx(0.1)
     assert response.pool_utilization == pytest.approx(expected_utilization)
     assert response.channel_busy_ratio == pytest.approx(expected_cbr)
     assert response.contending_attempts == expected_contenders
@@ -300,7 +300,7 @@ def test_collision_response_matches_the_validated_birthday_model() -> None:
         sensed_fraction=0.75,
     )
     expected_hidden = 19 * (1.0 - 0.85 * 0.75)
-    expected_collision = 1.0 - (1.0 - 1.0 / 400.0) ** expected_hidden
+    expected_collision = 1.0 - (1.0 - 1.0 / 200.0) ** expected_hidden
 
     assert response.sensing_reliability == pytest.approx(0.85)
     assert response.hidden_contenders == pytest.approx(expected_hidden)

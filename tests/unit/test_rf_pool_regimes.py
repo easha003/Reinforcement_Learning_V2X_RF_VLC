@@ -46,11 +46,11 @@ class LoadRegime:
 
 LOAD_REGIMES = (
     LoadRegime("empty", 0, 0, 0.0, 0.0, False, 0.0),
-    # Forty attempts consume ten percent of the headline 400-attempt pool.
-    LoadRegime("light-load", 100, 40, 0.1, 0.1, False, 0.1),
-    LoadRegime("saturation", 100, 400, 1.0, 1.0, False, 1.0),
-    # Two hundred RF-4 actors offer twice the physical pool capacity.
-    LoadRegime("overload", 200, 800, 2.0, 1.0, True, 1.0),
+    # Forty attempts consume twenty percent of the corrected 200-attempt pool.
+    LoadRegime("light-load", 100, 40, 0.2, 0.2, False, 0.1),
+    LoadRegime("saturation", 50, 200, 1.0, 1.0, False, 1.0),
+    # One hundred RF-4 actors offer twice the physical pool capacity.
+    LoadRegime("overload", 100, 400, 2.0, 1.0, True, 1.0),
 )
 
 
@@ -159,8 +159,8 @@ def test_named_load_regimes_have_auditable_pool_and_delayed_responses(
     model = _model()
     response = model.evaluate(_demand(regime), sensed_fraction=1.0)
 
-    assert response.candidate_resources == 400
-    assert response.pool_capacity_airtime_s == pytest.approx(0.2)
+    assert response.candidate_resources == 200
+    assert response.pool_capacity_airtime_s == pytest.approx(0.1)
     assert response.offered_airtime_s == pytest.approx(
         regime.offered_rf_attempts * 0.0005
     )
@@ -174,7 +174,7 @@ def test_named_load_regimes_have_auditable_pool_and_delayed_responses(
 
     expected_contenders = max(0, regime.offered_rf_attempts - 1)
     expected_hidden = expected_contenders * (1.0 - 0.85)
-    expected_collision = 1.0 - (1.0 - 1.0 / 400.0) ** expected_hidden
+    expected_collision = 1.0 - (1.0 - 1.0 / 200.0) ** expected_hidden
     assert response.contending_attempts == expected_contenders
     assert response.hidden_contenders == pytest.approx(expected_hidden)
     assert response.per_attempt_collision_probability == pytest.approx(

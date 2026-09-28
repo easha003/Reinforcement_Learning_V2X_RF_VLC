@@ -253,15 +253,26 @@ def test_release_drops_every_per_pair_state(rollout):
     assert not rollout._last_time_s
 
 
-# -- hopping ------------------------------------------------------------------
+# -- full-carrier allocation ---------------------------------------------------
 
 
-def test_hops_span_the_band_and_are_near_independent(rollout, config):
+def test_headline_attempts_repeat_on_the_same_full_carrier(rollout, config):
     offsets = rollout._hop_offsets_hz()
     assert len(offsets) == config.service.rf_attempts_per_packet
-    assert max(offsets) - min(offsets) == pytest.approx(config.rf.bandwidth_hz)
+    assert offsets == (0.0,) * config.service.rf_attempts_per_packet
+
+
+def test_two_carrier_pool_hops_between_ten_megahertz_centres(config):
+    multi_carrier = build_rollout(
+        config,
+        buildings=(),
+        root_seed=7,
+        collision_subchannels=2,
+    )
+    offsets = multi_carrier._hop_offsets_hz()
+    assert offsets == (-5e6, 5e6, -5e6)
     adjacent = frequency_correlation(abs(offsets[1] - offsets[0]), 200e-9)
-    assert adjacent < 0.2, "adjacent hops must decorrelate or three attempts are one"
+    assert adjacent < 0.1
 
 
 def test_a_single_attempt_profile_does_not_hop(rollout):
@@ -276,8 +287,7 @@ def test_a_single_attempt_profile_does_not_hop(rollout):
 
 
 def test_fading_gains_reach_the_attempts(rollout):
-    """Per attempt, not per packet: that is the difference between hopping and
-    repeating, and the profile grants three attempts for the former."""
+    """The 10 MHz baseline repeats one full-carrier fading realization."""
 
     tx, rx, fleet = platoon()
     _, _, _ = evaluate(rollout, tx, rx, fleet)
@@ -286,7 +296,10 @@ def test_fading_gains_reach_the_attempts(rollout):
         state=RFPropagationState.LOS,
     )
     assert len(gains) == rollout.lifecycle.timing.rf_attempts
-    assert len(set(gains.tolist())) > 1
+    assert gains == pytest.approx(
+        [float(gains[0])] * rollout.lifecycle.timing.rf_attempts,
+        abs=1e-5,
+    )
 
 
 def test_mismatched_fading_gains_are_refused():

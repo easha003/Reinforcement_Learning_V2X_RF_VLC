@@ -2,7 +2,7 @@
 
 The properties pinned here decide whether the paper's retransmission argument
 holds: how much time diversity the 3 ms deadline actually contains, and how
-much frequency diversity a subchannel hop actually buys.
+much frequency diversity a hop between full 10 MHz carriers actually buys.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ from hybrid_v2x_rl.channels.rf.fading import (
 from hybrid_v2x_rl.core.enums import RFPropagationState
 
 CARRIER_HZ = 5.9e9
-#: 24 RB at 30 kHz SCS is two 12-RB subchannels; centres 12 RB = 4.32 MHz apart.
-SUBCHANNELS_HZ = (0.0, 4.32e6)
+#: Adjacent full 10 MHz carrier-allocation centres in a wider system pool.
+SUBCHANNELS_HZ = (0.0, 10e6)
 
 
 def fading(seed: int = 7, subchannels: tuple[float, ...] = SUBCHANNELS_HZ) -> FadingProcess:
@@ -186,21 +186,15 @@ def test_coherence_bandwidth_inverts_the_correlation() -> None:
         )
 
 
-def test_the_two_subchannels_are_far_enough_apart_to_be_worth_hopping() -> None:
-    """The measurement that justifies hopping over repeating.
-
-    24 RB at 30 kHz SCS is two 12-RB subchannels, so a hop moves 4.32 MHz. The
-    coherence bandwidth is near 1.4 MHz at a 200 ns delay spread, so the hop is
-    roughly three coherence bandwidths and the two draws are weakly correlated.
-    Frequency diversity is available where time diversity is not.
-    """
+def test_two_full_carriers_are_far_enough_apart_to_be_worth_hopping() -> None:
+    """A wider system can hop between adjacent 10 MHz carrier centres."""
 
     coherence = coherence_bandwidth_hz(URBAN_RMS_DELAY_SPREAD_S)
     assert coherence == pytest.approx(1.38e6, rel=0.05)
 
     hop = SUBCHANNELS_HZ[1] - SUBCHANNELS_HZ[0]
-    assert hop / coherence > 3.0
-    assert frequency_correlation(hop, URBAN_RMS_DELAY_SPREAD_S) < 0.2
+    assert hop / coherence > 7.0
+    assert frequency_correlation(hop, URBAN_RMS_DELAY_SPREAD_S) < 0.1
 
 
 # -- distribution by class ----------------------------------------------------

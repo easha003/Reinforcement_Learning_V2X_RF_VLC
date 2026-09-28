@@ -13,7 +13,7 @@ from hybrid_v2x_rl.agents.system_feasibility_frontier import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DECLARATION = Path(
-    "configs/evaluation/pair_local_system_feasibility_frontier.yaml"
+    "configs/evaluation/full_carrier_system_feasibility_frontier.yaml"
 )
 
 

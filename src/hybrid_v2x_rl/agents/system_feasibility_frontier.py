@@ -541,8 +541,15 @@ def load_system_feasibility_frontier_declaration(
     *,
     project_root: str | Path,
     verify_evidence: bool = True,
+    enforce_current_headline: bool = True,
 ) -> SystemFeasibilityFrontierDeclaration:
-    """Load and fail-closed validate the pre-result frontier declaration."""
+    """Load and fail-closed validate the pre-result frontier declaration.
+
+    ``enforce_current_headline=False`` exists only so the completed abstract
+    RF-scaling diagnostic can verify its immutable, superseded 12-RB source
+    declaration. New or executable frontiers must keep the default and match
+    the active full-carrier collision contract.
+    """
 
     root = Path(project_root).expanduser().resolve(strict=False)
     declaration_path = Path(path).expanduser()
@@ -627,7 +634,7 @@ def load_system_feasibility_frontier_declaration(
     slots, capacities = _parse_capacity_levels(rf_axis)
     baseline_collision = headline_parameters()
     headline_capacity = next(level for level in capacities if level.headline)
-    if (
+    if enforce_current_headline and (
         slots != baseline_collision.selection_window_slots
         or headline_capacity.subchannels != baseline_collision.subchannels
         or headline_capacity.candidate_resources
@@ -636,12 +643,17 @@ def load_system_feasibility_frontier_declaration(
         raise SystemFeasibilityFrontierError(
             "headline RF capacity differs from the implemented collision model"
         )
+    bandwidth_reference_resources = (
+        baseline_collision.subchannels
+        if enforce_current_headline
+        else headline_capacity.subchannels
+    )
     base_bandwidth_mhz = base_config.rf.bandwidth_hz / 1e6
     for capacity in capacities:
         expected_bandwidth = (
             base_bandwidth_mhz
             * capacity.subchannels
-            / baseline_collision.subchannels
+            / bandwidth_reference_resources
         )
         if not math.isclose(
             capacity.equivalent_system_bandwidth_mhz,

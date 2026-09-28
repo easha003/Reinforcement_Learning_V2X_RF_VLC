@@ -265,7 +265,7 @@ def test_the_report_states_what_the_population_asked_of_the_pool() -> None:
     report.contender_total = 159_000  # 159 contenders on every packet
 
     assert report.mean_contenders == pytest.approx(159.0)
-    assert report.resource_demand == pytest.approx(159 * 3 / 400.0)
+    assert report.resource_demand == pytest.approx(159 * 3 / 200.0)
     assert report.resource_demand > 1.0
     assert not report.deliverable
 
@@ -277,7 +277,7 @@ def test_a_sparse_population_fits_the_pool() -> None:
     report.packets = 1_000
     report.contender_total = 47_000
 
-    assert report.resource_demand == pytest.approx(47 * 3 / 400.0)
+    assert report.resource_demand == pytest.approx(47 * 3 / 200.0)
     assert report.deliverable
 
 
@@ -292,15 +292,15 @@ def test_the_pool_claim_is_absent_rather_than_wrong_before_any_packet() -> None:
 # -- the equilibrium, scored --------------------------------------------------
 
 
-def test_the_equilibrium_is_scored_on_the_channel_its_own_allocation_produces() -> None:
-    """Two passes, and the second one is the point.
+def test_the_legacy_equilibrium_is_exposed_as_undeliverable_after_pool_correction() -> None:
+    """The full-carrier correction must invalidate an overloaded policy.
 
     Scoring the allocation against the profile's contention would report a
     policy nobody could run: the packets carried by light return their share of
     the pool, so the radio the remaining packets face is not the radio the
-    survey pass measured. The pool claim is the check -- at rho = 30 four
-    attempts claim 1.60 at full radio use, and the equilibrium has to come back
-    under one or the allocation it describes was never deliverable.
+    survey pass measured. The corrected pool claim is the check. The previously
+    selected equilibrium remains above one, proving that its attractive miss
+    rate cannot authorize training under one 10 MHz full-carrier resource.
     """
 
     from pathlib import Path
@@ -326,11 +326,10 @@ def test_the_equilibrium_is_scored_on_the_channel_its_own_allocation_produces() 
     )
     stats = report.policies[campaign.EQUILIBRIUM]
 
-    # Contenders come from the survey pass, not the frame's neighbour list --
-    # the latter is several times larger and reported a claim of 5.38.
+    # Contenders come from the survey pass, not the frame's neighbour list.
     assert 140 < report.mean_contenders < 190
-    assert report.resource_demand < 1.0
-    assert report.deliverable
+    assert report.resource_demand > 1.0
+    assert not report.deliverable
 
     # Both media carry packets, which is the claim the policy exists to make.
     assert stats.choices["RF"] > 0

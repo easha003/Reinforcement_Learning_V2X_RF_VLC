@@ -40,7 +40,7 @@ def test_audit_pins_the_live_finite_blocklength_inputs(
     assert required["bler_1e-5"] == pytest.approx(1.457377, abs=1e-6)
 
 
-def test_audit_detects_the_resource_granularity_mismatch(
+def test_audit_confirms_the_full_carrier_resource_contract(
     audit: dict[str, object],
 ) -> None:
     pool = audit["collision_pool_interpretation"]
@@ -49,15 +49,18 @@ def test_audit_detects_the_resource_granularity_mismatch(
     assert isinstance(pool, dict)
     assert isinstance(checks, dict)
     assert isinstance(decision, dict)
-    assert pool["resource_blocks_per_subchannel"] == 12
-    assert pool["active_link_allocation_spans_subchannels"] == 2.0
-    assert pool["one_subchannel_available_coded_bits"] == pytest.approx(4838.4)
+    assert pool["resource_unit"] == "one full 10 MHz, 24-RB carrier allocation"
+    assert pool["full_carrier_resources"] == 1
+    assert pool["resource_blocks_per_subchannel"] == 24
+    assert pool["active_link_allocation_spans_subchannels"] == 1.0
+    assert pool["one_subchannel_available_coded_bits"] == pytest.approx(9676.8)
     assert pool["minimum_code_rate_to_fit_current_block_in_one_subchannel"] == (
-        pytest.approx(0.5753968254)
+        pytest.approx(0.2876984127)
     )
     assert checks["configured_block_fits_full_carrier"] is True
-    assert checks["configured_block_fits_one_pool_subchannel"] is False
-    assert checks["link_allocation_equals_one_pool_subchannel"] is False
+    assert checks["configured_block_fits_one_pool_subchannel"] is True
+    assert checks["link_allocation_equals_one_pool_subchannel"] is True
+    assert decision["allocation_contract_consistent"] is True
     assert decision["physical_profile_freeze_ready"] is False
     assert decision["training_authorization"] is False
 

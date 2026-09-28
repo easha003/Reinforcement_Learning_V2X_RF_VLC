@@ -219,24 +219,26 @@ class Rollout:
         self._active_trace_id = trace_id
 
     def _hop_offsets_hz(self) -> tuple[float, ...]:
-        """Where in the band each granted attempt lands.
+        """Return the full-carrier centre used by each granted attempt.
 
-        Attempts are spread evenly across the configured bandwidth rather than
-        stacked, because that is what makes three attempts worth more than one
-        repetition. With a 200 ns urban delay spread the subchannels decorrelate
-        to 0.5 within about 1.4 MHz, so a 10 MHz band gives three near-
-        independent hops -- and the frequency correlation is computed from that
-        spacing rather than asserted, so a narrower band would correctly show
-        less diversity instead of the same amount.
+        One RF allocation consumes the complete configured 10 MHz carrier.
+        Consequently, the headline one-resource pool repeats at the same
+        centre and obtains no intra-carrier hopping diversity. A wider pool may
+        contain multiple adjacent 10 MHz carrier allocations; only then do
+        successive attempts hop between carrier centres. ``subchannels`` is a
+        legacy collision-schema name for that full-carrier resource count.
         """
 
         attempts = self.lifecycle.timing.rf_attempts
-        if attempts == 1:
-            return (0.0,)
-        span = self.lifecycle.rf.bandwidth_hz
-        return tuple(
-            -0.5 * span + span * index / (attempts - 1) for index in range(attempts)
+        resources = self.lifecycle.rf.collision.subchannels
+        if resources == 1:
+            return (0.0,) * attempts
+        carrier_width = self.lifecycle.rf.bandwidth_hz
+        centres = tuple(
+            (index - 0.5 * (resources - 1)) * carrier_width
+            for index in range(resources)
         )
+        return tuple(centres[index % resources] for index in range(attempts))
 
     def _tape(
         self, trace_id: str, pair_id: str, index: int, fading_gains: Iterable[float]
@@ -477,9 +479,9 @@ class Rollout:
             blockage_db=blockage_db,
             shadowing_normalized=normalized,
             # The shared-pool model currently exposes one propagation risk for
-            # every reserved attempt.  Use the first frequency-hop state as that
+            # every reserved attempt. Use the first carrier state as that
             # contract's focal attempt; legacy replay below still consumes the
-            # complete hopped sequence from ``fading_power_gains``.
+            # complete per-attempt sequence from ``fading_power_gains``.
             fading_power_gain=float(gains[0]),
         )
         return _AdvancedPairState(

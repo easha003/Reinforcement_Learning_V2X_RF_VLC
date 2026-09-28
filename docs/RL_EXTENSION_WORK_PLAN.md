@@ -825,11 +825,18 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          subchannels. The rate-1/3 block cannot fit one such subchannel, and
          the declared RF calibration artifact is absent. The audit therefore
          fails closed and starts no training.
-       - [ ] Freeze the recommended full-10-MHz-carrier allocation contract,
-         correct the physical pool mapping to 1/2/4 resources at 10/20/40 MHz,
-         and then predeclare a calibrated independent receive-diversity
-         frontier. Re-run only the affected certificate-aware feasibility
-         evidence; mobility traces and completed state audits remain reusable.
+       - [x] Freeze the full-10-MHz-carrier allocation contract and correct the
+         physical pool mapping to 1/2/4 resources at 10/20/40 MHz. The baseline
+         now has 200 rather than 400 candidates and repeats attempts at one
+         carrier centre; only wider pools obtain inter-carrier frequency
+         diversity. The corrected 36-cell declaration passed its structural
+         dry run without evaluating frames. See
+         `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`.
+       - [ ] Predeclare a calibrated independent receive-diversity frontier
+         with explicit antenna count, combining rule, branch-correlation and
+         implementation-loss sensitivity. Re-run only the affected
+         certificate-aware feasibility evidence; mobility traces and completed
+         state audits remain reusable.
 5. [x] Apply the reliability curriculum:
 
    ```text

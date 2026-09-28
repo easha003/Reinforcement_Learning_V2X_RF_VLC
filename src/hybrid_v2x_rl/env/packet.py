@@ -21,10 +21,11 @@ oracle's advantage a measurement: the oracle picks the best action on a packet
 whose outcomes were all drawn from one tape, rather than the luckiest draw.
 
 **Retransmission is asymmetric, and the asymmetry is physical.** The radio gets
-three hopped attempts because collision is redrawn on every attempt. The optical
-leg gets one because a blocked path stays blocked for hundreds of milliseconds,
-so a second attempt inside a 3 ms deadline would spend airtime on a certainty.
-Both numbers come from the frozen service profile rather than from here.
+three pre-reserved attempts and collision is redrawn on every attempt. At the
+10 MHz headline point those attempts repeat on the same full carrier; wider
+system pools may hop between complete 10 MHz carriers. The optical leg gets one
+because a blocked path stays blocked for hundreds of milliseconds. Both attempt
+counts come from the frozen service profile rather than from here.
 """
 
 from __future__ import annotations
@@ -89,8 +90,9 @@ class PacketTape:
     #: On the tape rather than in the request because it is part of the
     #: packet's realized channel, and the matched-tape rule says RF-only and
     #: DUP must see the *same* fade on the same packet. It is per attempt
-    #: because the attempts hop: that is the entire reason the profile grants
-    #: three of them rather than repeating one.
+    #: because wider resource pools may hop between complete carrier
+    #: allocations. In the one-carrier headline profile these values are
+    #: frequency-correlated repetitions.
     #:
     #: Empty means "no per-attempt realization supplied" and the request's
     #: single ``fading_power_gain`` applies to every attempt -- which is a link
@@ -210,16 +212,16 @@ class PacketLifecycle:
     def _run_rf(
         self, request: RFChannelRequest, tape: PacketTape
     ) -> tuple[bool, float | None, FailureCause, int, float, float | None]:
-        """Up to ``rf_attempts`` hopped attempts, stopping at the first success.
+        """Up to ``rf_attempts`` reserved attempts, stopping at first success.
 
         Stopping early is not an optimization and does not save cost: the
         opportunity is pre-reserved, so the airtime is committed whether or not
         it is used. It only decides the arrival time.
 
         The SINR returned is the *last attempt actually made*, because that is
-        the freshest thing a receiver could report back. The attempts hop, so
-        they do not share a fade, and averaging them would report a channel
-        that no single attempt saw.
+        the freshest thing a receiver could report back. Attempts may repeat
+        one carrier or hop across a wider pool, so averaging their realized
+        fades would report a channel that no single attempt saw.
         """
 
         attempts = min(self.timing.rf_attempts, len(tape.rf_attempts))
@@ -261,10 +263,11 @@ class PacketLifecycle:
         bookkeeping.
 
         The product form assumes attempts fail independently. That is the same
-        assumption :meth:`_run_rf` realizes by drawing a fresh collision and a
-        fresh hop per attempt, and it is the optimistic reading: correlated
-        collisions across attempts would raise this. It is stated here because
-        it is the single assumption the three-attempt profile rests on.
+        assumption :meth:`_run_rf` realizes by drawing fresh access and
+        decoding uniforms per attempt. Fading gains themselves remain
+        correlated according to the carrier allocation. Correlated collisions
+        across attempts would raise this result, so the assumption remains an
+        explicitly optimistic boundary.
         """
 
         attempts = min(self.timing.rf_attempts, len(tape.rf_attempts))

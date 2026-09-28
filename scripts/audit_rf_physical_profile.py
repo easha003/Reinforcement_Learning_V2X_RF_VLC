@@ -21,7 +21,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("artifacts/evaluations/phase8_rf_physical_profile_audit.json"),
+        default=Path(
+            "artifacts/evaluations/phase8_rf_full_carrier_profile_audit.json"
+        ),
     )
     return parser
 
@@ -54,6 +56,10 @@ def main() -> int:
     print(
         "configured block fits one pool subchannel: "
         f"{payload['checks']['configured_block_fits_one_pool_subchannel']}"
+    )
+    print(
+        "allocation contract consistent: "
+        f"{decision['allocation_contract_consistent']}"
     )
     print(
         "physical profile freeze ready: "

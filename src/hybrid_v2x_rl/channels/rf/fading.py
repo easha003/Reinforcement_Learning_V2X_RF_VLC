@@ -34,13 +34,13 @@ which is where the reliability constraint binds hardest and where RF congestion
 is simultaneously worst. Genuine decorrelation inside the deadline happens only
 in free flow, which is the regime that already has link margin.
 
-**Frequency diversity is therefore the mechanism that works**, because it does
-not depend on how fast traffic is moving. With 24 RB at 30 kHz SCS the carrier
-holds two 12-RB subchannels whose centres are 4.32 MHz apart, against a
-coherence bandwidth near 1.4 MHz: a hop crosses roughly three coherence
-bandwidths and the two draws are weakly correlated. The retransmission model
-must **hop rather than repeat**, and this module is where that becomes
-measurable rather than asserted.
+**Frequency diversity requires another full carrier.** The configured block
+consumes all 24 RB of the 10 MHz carrier, so repeated attempts in the headline
+pool share one carrier centre and do not receive an invented intra-carrier hop.
+A 20 or 40 MHz system can supply two or four adjacent 10 MHz allocations;
+their centres are at least 10 MHz apart, well beyond the approximately 1.4 MHz
+coherence bandwidth. This module represents that optional inter-carrier
+diversity while leaving the 10 MHz baseline frequency-correlated.
 
 Sourcing status, as elsewhere in M3: the Rician K-factor and the RMS delay
 spread are **not yet verified** against TR 37.885 and carry the same status as

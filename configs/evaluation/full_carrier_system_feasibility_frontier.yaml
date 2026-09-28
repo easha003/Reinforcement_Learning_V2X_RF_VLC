@@ -1,0 +1,108 @@
+schema: "hybrid-rf-vlc-rl.pair-local-system-feasibility-frontier-declaration.v1"
+frozen_date: "2026-09-28"
+
+objective:
+  miss_budget: 0.0001
+  densities_vehicles_per_lane_km: [10.0, 20.0, 30.0]
+  required_split: "validation"
+  test_split_opened: false
+  interpretation: "corrected full-carrier resource screening gate, not final statistical reliability evidence"
+
+evidence:
+  environment_seed: 20260728
+  window_source:
+    path: "artifacts/evaluations/phase8_state_regime_audit.json"
+    sha256: "35b240c2fc58b46f02999d225663b6a91803509309cf098b4927e19aa6a7b2a7"
+    schema: "hybrid-rf-vlc-rl.state-regime-audit.v3"
+    validation_windows_per_density: 3
+    frames_per_window: 16
+  baseline_policy_environment_scope_hash: "46fecd53689db6f2c9aa21b4314da610b0caa7e47444a4a9b01f5ba4a3b1cb29"
+  actor_used: false
+  checkpoint_used: false
+  normalization: "fresh frozen identity state; ignored by the oracle policy"
+
+base_config_layers:
+  - "configs/project/default.yaml"
+  - "configs/mobility/synthetic_manhattan.yaml"
+  - "configs/service/ev2x_300B_3ms_1e-4.yaml"
+  - "configs/channel/rf_nr_v2x.yaml"
+  - "configs/channel/vlc_vehicle.yaml"
+  - "configs/observation/causal_200ms_forecast.yaml"
+  - "configs/training/primal_dual_ppo.yaml"
+  - "configs/evaluation/primary.yaml"
+
+axes:
+  rf_capacity:
+    selection_window_slots: 200
+    # ``subchannels`` is retained by the v1 schema. Each unit is now one
+    # complete 10 MHz, 24-RB carrier allocation, never a 12-RB half-carrier.
+    levels:
+      - name: "rf-capacity-1x"
+        subchannels: 1
+        candidate_resources: 200
+        equivalent_system_bandwidth_mhz: 10.0
+        headline: true
+      - name: "rf-capacity-2x"
+        subchannels: 2
+        candidate_resources: 400
+        equivalent_system_bandwidth_mhz: 20.0
+        headline: false
+      - name: "rf-capacity-4x"
+        subchannels: 4
+        candidate_resources: 800
+        equivalent_system_bandwidth_mhz: 40.0
+        headline: false
+  sensing_band:
+    levels:
+      - name: "nominal"
+        sensing_reliability: 0.85
+        headline: true
+      - name: "pessimistic"
+        sensing_reliability: 0.70
+        headline: false
+      - name: "optimistic"
+        sensing_reliability: 0.95
+        headline: false
+  optical_configuration:
+    levels:
+      - name: "wide-60deg"
+        additional_config_layers: []
+        receiver_fov_deg: 60.0
+        headline: true
+      - name: "concentrated-30deg"
+        additional_config_layers:
+          - "configs/channel/vlc_vehicle_concentrated.yaml"
+        receiver_fov_deg: 30.0
+        headline: false
+  fallback_view:
+    levels:
+      - name: "contract-dup4"
+        mode: "contract"
+        diagnostic_only: false
+        authorizes_training: true
+      - name: "all-rows-oracle-controlled"
+        mode: "all_usable"
+        diagnostic_only: true
+        authorizes_training: false
+
+execution:
+  cross_product: true
+  expected_physical_points: 18
+  expected_evaluation_cells: 36
+  exact_assignment_cap: 100000
+  max_search_iterations: 16
+  no_adaptive_axis_expansion: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_full_carrier_system_feasibility_frontier.json"
+
+verdicts:
+  density_feasible: "realizable candidate mean conditional miss risk <= miss_budget"
+  density_infeasible: "certified lower bound > miss_budget, or exact optimum > miss_budget"
+  density_inconclusive: "candidate > miss_budget, lower bound <= miss_budget, and optimality is not proven"
+  cell_feasible: "every density is feasible"
+  cell_infeasible: "at least one density is proven infeasible"
+  cell_inconclusive: "not feasible, no density is proven infeasible, and at least one density is inconclusive"
+  training_authorization: "contract-dup4 cell feasible for every sensing band at one RF-capacity/optical configuration"
+  fallback_diagnostic: "all-rows-oracle-controlled never authorizes training"
+  minimal_change_rule: "report every robust-feasible Pareto-minimal point over added full-carrier RF resources and optical-profile change; do not invent a scalar hardware cost"

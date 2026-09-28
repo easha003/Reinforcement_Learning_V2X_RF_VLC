@@ -298,6 +298,11 @@ def load_reliability_scaling_declaration(
         frontier_path,
         project_root=root,
         verify_evidence=verify_evidence,
+        # This diagnostic is frozen to the completed, now-superseded
+        # two-12-RB interpretation. It remains evidence for the abstract
+        # zero-contention propagation divisor, but cannot be executed as the
+        # current physical frontier.
+        enforce_current_headline=False,
     )
     if frontier.sha256 != expected_frontier_sha:
         raise ReliabilityScalingError("source frontier declaration digest has drifted")

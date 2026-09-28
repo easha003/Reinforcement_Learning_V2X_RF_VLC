@@ -334,9 +334,9 @@ class DensityReport:
         that is not visible anywhere else in it. The collision model asks where
         one selection lands, not whether every selection can be honoured, so an
         oversubscribed profile still reports a modest per-attempt failure and a
-        plausible miss rate. The frozen headline profile sits at 1.19 here at
-        the densest trained condition, which no previous version of this table
-        said out loud.
+        plausible miss rate. Under the corrected full-carrier resource unit the
+        headline profile sits above two at the densest trained condition, which
+        a clipped CBR does not say out loud.
         """
 
         if self.collision is None or not self.packets:

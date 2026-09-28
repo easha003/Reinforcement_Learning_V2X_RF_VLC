@@ -55,11 +55,11 @@ def test_the_model_names_itself_and_does_not_claim_mode_two() -> None:
     assert "nr" not in MODEL_NAME.lower().split()
 
 
-def test_the_headline_pool_is_two_subchannels_over_a_hundred_millisecond_window() -> None:
+def test_the_headline_pool_is_one_full_carrier_over_a_hundred_millisecond_window() -> None:
     parameters = headline_parameters()
-    assert parameters.subchannels == 2
+    assert parameters.subchannels == 1
     assert parameters.selection_window_slots == 200
-    assert parameters.candidate_resources == 400
+    assert parameters.candidate_resources == 200
 
 
 def test_invalid_scopes_are_refused() -> None:
@@ -75,7 +75,7 @@ def test_invalid_scopes_are_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    ("density", "expected"), [(10, 0.3525), (20, 0.8100), (30, 1.0)]
+    ("density", "expected"), [(10, 0.705), (20, 1.0), (30, 1.0)]
 )
 def test_channel_busy_ratio_tracks_the_measured_neighbour_counts(
     density: int, expected: float
@@ -144,7 +144,7 @@ def test_half_duplex_is_the_receiver_duty_cycle() -> None:
 
 @pytest.mark.parametrize(
     ("density", "optimistic", "nominal", "pessimistic"),
-    [(10, 2.08, 3.22, 4.92), (20, 2.82, 5.41, 9.17), (30, 3.48, 7.31, 12.78)],
+    [(10, 2.65, 4.92, 8.22), (20, 4.13, 9.18, 16.27), (30, 5.42, 12.80, 22.80)],
 )
 def test_the_declared_band_at_each_trained_density(
     density: int, optimistic: float, nominal: float, pessimistic: float
@@ -164,8 +164,8 @@ def test_the_declared_band_at_each_trained_density(
 def test_the_band_is_wide_enough_to_span_the_weaker_link_crossover() -> None:
     """Why bands are mandatory rather than decorative.
 
-    At rho = 30 the optical link is unavailable 7.26% of the time. RF
-    access-layer loss is 2.95% optimistic and 12.14% pessimistic, so *which
+    At rho = 30 the optical link is unavailable 11.87% of the time. RF
+    access-layer loss is 5.42% optimistic and 22.80% pessimistic, so *which
     medium is the weaker one at the top of the band* is not determined by the
     model -- it is determined by which end of the declared uncertainty is
     taken. Reporting only the nominal would silently pick a side of that
@@ -217,13 +217,13 @@ def test_a_single_rf_attempt_cannot_meet_the_budget_at_any_density() -> None:
             assert loss > 150 * budget
 
 
-def test_duplication_needs_two_hopped_rf_attempts_to_reach_the_budget() -> None:
+def test_duplication_needs_more_than_two_reserved_rf_attempts() -> None:
     """The measurement that settles a frozen service parameter.
 
-    With one RF attempt, DUP at rho = 20 nominal gives 5.41% x 14.62% = 7.9e-3,
-    which is 79x over budget. A second attempt on the other subchannel is
-    near-independent for collision -- a different resource is drawn -- so the RF
-    leg becomes 2.9e-3 and DUP lands near 4.3e-4. Still over.
+    With one RF attempt, DUP at rho = 20 nominal gives 9.18% x 14.62% = 1.34e-2,
+    which is 134x over budget. A second independently selected time-frequency
+    reservation makes the RF access term 8.43e-3 and DUP lands near 1.23e-3.
+    Still over.
 
     Independence across attempts is the optimistic reading, and even it does
     not clear 10^-4 at the nominal band. The conclusion is not that two
@@ -237,13 +237,13 @@ def test_duplication_needs_two_hopped_rf_attempts_to_reach_the_budget() -> None:
     single = failure_probability(MEASURED_NEIGHBOURS[20], parameters)
 
     one_attempt = single * optical
-    assert one_attempt == pytest.approx(7.9e-3, rel=0.1)
+    assert one_attempt == pytest.approx(1.34e-2, rel=0.1)
     assert one_attempt > 1e-4, "one RF attempt cannot reach the budget under DUP"
 
     two_attempts = single**2 * optical
-    assert two_attempts == pytest.approx(4.3e-4, rel=0.15)
+    assert two_attempts == pytest.approx(1.23e-3, rel=0.15)
     assert two_attempts > 1e-4, "even two attempts do not clear it at nominal"
-    assert two_attempts < one_attempt / 10.0, "but a second attempt is worth 18x"
+    assert two_attempts < one_attempt / 10.0, "but a second attempt is worth about 11x"
 
 
 def test_half_duplex_is_tied_to_the_profile_rather_than_to_a_constant() -> None:
@@ -320,8 +320,8 @@ def test_the_headline_profile_oversubscribes_the_pool_at_the_densest_condition()
     """Three attempts ask for more airtime than rho = 30 has to give.
 
     The pool supplies ``subchannels * generation_period`` of airtime per period,
-    which at two subchannels and 0.5 ms slots is 400 resources. With 159
-    measured contenders each committing three, demand is 1.19 -- the profile is
+    which under one full carrier and 0.5 ms slots is 200 resources. With 162
+    measured contenders each committing three, demand is 2.43 -- the profile is
     not deliverable, and no collision probability says so, because the birthday
     model asks where one selection lands rather than whether every selection can
     be honoured.
@@ -335,11 +335,11 @@ def test_the_headline_profile_oversubscribes_the_pool_at_the_densest_condition()
     assert resource_demand(MEASURED_NEIGHBOURS[10], parameters) < 1.0
     assert resource_demand(MEASURED_NEIGHBOURS[30], parameters) > 1.0
     assert resource_demand(MEASURED_NEIGHBOURS[30], parameters) == pytest.approx(
-        162 * 3 / 400.0
+        162 * 3 / 200.0
     )
 
     # And the collision model is untroubled by it, which is the point.
-    assert failure_probability(MEASURED_NEIGHBOURS[30], parameters) < 0.1
+    assert failure_probability(MEASURED_NEIGHBOURS[30], parameters) < 0.15
 
 
 def test_resource_demand_counts_attempts_against_the_candidate_pool() -> None:

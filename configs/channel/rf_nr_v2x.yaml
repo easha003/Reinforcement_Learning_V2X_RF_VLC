@@ -9,8 +9,8 @@ rf:
   # 16QAM, chosen to buy time rather than throughput.  The link carries 30-52 dB
   # of margin over what decoding needs across the whole pair window (M3), and
   # the profile was spending none of it.  16QAM costs about 6 dB and halves the
-  # allocation from two slots to one, which is what makes three hopped
-  # retransmissions fit inside the 3 ms deadline.
+  # allocation from two slots to one, which is what makes three pre-reserved
+  # attempts fit inside the 3 ms deadline.
   #
   # In the LOS boundary check, analytical access failure is roughly 22-135x
   # the deep-fade outage. Other propagation classes are reported separately;

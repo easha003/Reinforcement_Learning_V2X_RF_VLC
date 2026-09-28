@@ -30,7 +30,7 @@ from hybrid_v2x_rl.agents.system_feasibility_frontier import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DECLARATION_PATH = Path(
-    "configs/evaluation/pair_local_system_feasibility_frontier.yaml"
+    "configs/evaluation/full_carrier_system_feasibility_frontier.yaml"
 )
 VerdictChooser = Callable[[FrontierEvaluationCell], str]
 
@@ -236,7 +236,7 @@ def test_structural_dry_run_instantiates_every_declared_cell() -> None:
     assert payload["physical_points"] == 18
     assert payload["evaluation_cells"] == 36
     assert len(payload["cells"]) == 36
-    assert {row["rf_subchannels"] for row in report.cell_plans} == {2, 4, 8}
+    assert {row["rf_subchannels"] for row in report.cell_plans} == {1, 2, 4}
     assert {row["sensing_reliability"] for row in report.cell_plans} == {
         0.70,
         0.85,

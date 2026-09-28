@@ -32,9 +32,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TRACE_ID = "synthetic-local-response-contract"
 ATTEMPT_AIRTIME_S = 0.0005
 GENERATION_PERIOD_S = 0.1
-SUBCHANNELS = 2
-CANDIDATE_RESOURCES = 400
-POOL_CAPACITY_AIRTIME_S = 0.2
+SUBCHANNELS = 1
+CANDIDATE_RESOURCES = 200
+POOL_CAPACITY_AIRTIME_S = 0.1
 SENSING_RELIABILITY = {
     SensitivityBand.OPTIMISTIC: 0.95,
     SensitivityBand.NOMINAL: 0.85,
@@ -319,25 +319,25 @@ def test_cbr_saturates_but_utilization_preserves_overload_in_every_band(
     band: SensitivityBand,
 ) -> None:
     below = _response(
-        _load(focal_attempts=0, hidden_external_attempts=399),
+        _load(focal_attempts=0, hidden_external_attempts=199),
         band,
     )
     exact = _response(
-        _load(focal_attempts=0, hidden_external_attempts=400),
+        _load(focal_attempts=0, hidden_external_attempts=200),
         band,
     )
     above = _response(
-        _load(focal_attempts=0, hidden_external_attempts=401),
+        _load(focal_attempts=0, hidden_external_attempts=201),
         band,
     )
 
-    assert below.pool_utilization == pytest.approx(399 / 400)
-    assert below.channel_busy_ratio == pytest.approx(399 / 400)
+    assert below.pool_utilization == pytest.approx(199 / 200)
+    assert below.channel_busy_ratio == pytest.approx(199 / 200)
     assert not below.oversubscribed
     assert exact.pool_utilization == pytest.approx(1.0)
     assert exact.channel_busy_ratio == pytest.approx(1.0)
     assert not exact.oversubscribed
-    assert above.pool_utilization == pytest.approx(401 / 400)
+    assert above.pool_utilization == pytest.approx(201 / 200)
     assert above.channel_busy_ratio == pytest.approx(1.0)
     assert above.oversubscribed
     assert (

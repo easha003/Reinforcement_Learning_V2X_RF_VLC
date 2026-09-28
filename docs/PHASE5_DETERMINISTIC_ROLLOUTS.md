@@ -115,10 +115,11 @@ checks:
 - cutoff semantics without fabricated truncations;
 - random, cycle, and fixed-action policy-name validation.
 
-The existing legacy rollout tests remain unchanged in behavior. The extracted
-action-independent channel evaluation shares one correlated-state advance with
-the legacy action evaluator, which continues to use its complete hopped fading
-tape.
+The extracted action-independent channel evaluation shares one correlated-state
+advance with the legacy action evaluator, which consumes the complete
+per-attempt fading tape. As of the corrected full-carrier allocation contract,
+the 10 MHz baseline repeats one carrier realization; only wider pools can hop
+between complete 10 MHz carrier allocations.
 
 The dedicated normalization suite additionally verifies frame-frozen Welford
 updates, encoded-column pass-through, sentinel/history-padding inclusion,

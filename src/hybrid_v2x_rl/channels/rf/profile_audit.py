@@ -88,6 +88,16 @@ def build_rf_physical_profile_audit(config: ProjectConfig) -> dict[str, object]:
         ),
         "declared_calibration_artifact_exists": rf.calibration_artifact.exists(),
     }
+    allocation_check_names = (
+        "resource_blocks_match_10mhz_30khz_reference",
+        "pool_divides_into_integer_subchannels",
+        "configured_block_fits_full_carrier",
+        "configured_block_fits_one_pool_subchannel",
+        "link_allocation_equals_one_pool_subchannel",
+    )
+    allocation_contract_consistent = all(
+        checks[name] for name in allocation_check_names
+    )
     freeze_ready = all(checks.values())
 
     return {
@@ -131,6 +141,9 @@ def build_rf_physical_profile_audit(config: ProjectConfig) -> dict[str, object]:
             "declared_calibration_artifact": calibration_artifact,
         },
         "collision_pool_interpretation": {
+            "resource_unit": "one full 10 MHz, 24-RB carrier allocation",
+            "legacy_resource_count_field": "subchannels",
+            "full_carrier_resources": collision.subchannels,
             "subchannels": collision.subchannels,
             "resource_blocks_per_subchannel": rb_per_subchannel,
             "one_subchannel_available_coded_bits": subchannel_coded_bits,
@@ -162,15 +175,16 @@ def build_rf_physical_profile_audit(config: ProjectConfig) -> dict[str, object]:
         },
         "checks": checks,
         "decision": {
+            "allocation_contract_consistent": allocation_contract_consistent,
             "physical_profile_freeze_ready": freeze_ready,
             "training_authorization": False,
             "blocking_findings": [
                 name for name, passed in checks.items() if not passed
             ],
             "required_resolution": (
-                "Choose and calibrate one consistent allocation contract: either "
-                "one full 10 MHz carrier per attempt (and reinterpret pool capacity) "
-                "or one 12-RB subchannel per attempt (and revise coding/MCS/link BLER)."
+                "Retain the corrected full-10-MHz allocation contract and supply "
+                "the missing calibration evidence before freezing a receive-diversity "
+                "or other physical reliability intervention."
             ),
         },
     }

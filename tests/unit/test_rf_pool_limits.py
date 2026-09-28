@@ -21,7 +21,7 @@ MAX_RF_ATTEMPTS_PER_PAIR = 4
 # Independent headline primitives. These deliberately do not call the
 # collision module's resource-demand, CBR, hidden-contender, or collision
 # helpers: the point is to cross-check the adapter against the equations.
-SUBCHANNELS = 2
+SUBCHANNELS = 1
 SELECTION_WINDOW_SLOTS = 200
 ATTEMPT_AIRTIME_S = 0.0005
 GENERATION_PERIOD_S = 0.1
@@ -47,10 +47,10 @@ class AnalyticalCase:
 ANALYTICAL_CASES = (
     AnalyticalCase("zero-load", 0, SensitivityBand.NOMINAL, 1.0),
     AnalyticalCase("focal-attempt-only", 1, SensitivityBand.PESSIMISTIC, 0.0),
-    AnalyticalCase("one-below-saturation", 399, SensitivityBand.OPTIMISTIC, 0.25),
-    AnalyticalCase("exact-saturation", 400, SensitivityBand.NOMINAL, 0.5),
-    AnalyticalCase("first-overload", 401, SensitivityBand.PESSIMISTIC, 0.75),
-    AnalyticalCase("twice-capacity", 800, SensitivityBand.NOMINAL, 1.0),
+    AnalyticalCase("one-below-saturation", 199, SensitivityBand.OPTIMISTIC, 0.25),
+    AnalyticalCase("exact-saturation", 200, SensitivityBand.NOMINAL, 0.5),
+    AnalyticalCase("first-overload", 201, SensitivityBand.PESSIMISTIC, 0.75),
+    AnalyticalCase("twice-capacity", 400, SensitivityBand.NOMINAL, 1.0),
 )
 
 

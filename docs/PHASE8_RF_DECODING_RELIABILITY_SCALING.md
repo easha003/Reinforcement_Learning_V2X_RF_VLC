@@ -4,6 +4,12 @@ Status: complete; `2x` is the first declared passing factor; training remains bl
 
 Date frozen: 2026-09-28
 
+> **Scope note:** the source frontier's former bandwidth labels were
+> superseded by `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`. This diagnostic's
+> zero-contention propagation calculation remains an abstract necessary
+> condition because it changes only action-independent RF decoding failure; it
+> is not evidence that the historical collision-resource mapping is physical.
+
 ## Purpose
 
 The completed system-feasibility frontier proved that the current bounded

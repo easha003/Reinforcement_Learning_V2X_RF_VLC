@@ -89,7 +89,7 @@ def test_collision_risk_never_decreases_at_any_adjacent_offered_load(
     assert all(higher > lower for lower, higher in pairwise(probabilities[1:]))
 
     saturation = model.attempt_parameters.candidate_resources
-    assert saturation == 400
+    assert saturation == 200
     assert responses[saturation].channel_busy_ratio == pytest.approx(1.0)
     assert responses[-1].channel_busy_ratio == pytest.approx(1.0)
     assert (

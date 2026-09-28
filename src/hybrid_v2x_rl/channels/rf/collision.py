@@ -18,9 +18,9 @@ paraphrase.
 mode genuinely *decoupled* from optical blockage. NLOSv is the same geometric
 event that severs the optical path, so diversity arguments built on it are
 circular. Collision is driven by a headcount, and the measured campaign shows
-the two moving in opposite directions across the training band: neighbours
-within 200 m rise 44 -> 100 -> 159 while V-VLC unavailability falls
-9.59% -> 9.17% -> 7.26%. At rho = 10 the optical link is the weaker one; at
+the two moving in opposite directions across the training band: median
+neighbours within 200 m rise 47 -> 108 -> 162 while V-VLC geometric outage
+falls 15.60% -> 14.62% -> 11.87%. At rho = 10 the optical link is the weaker one; at
 rho = 30 the radio is. That opposition is what RQ4 needs, and it lives here.
 
 **Where coupling does re-enter, stated rather than hidden.** The *sensed
@@ -30,6 +30,12 @@ The caller supplies that fraction, so the coupling is visible at the call site
 instead of buried in a constant. Section 8.3 requires the joint failure
 probability to be logged rather than assumed independent; a module that hid
 this would make that measurement meaningless.
+
+**Resource unit.** One value of ``subchannels`` is retained as the field name
+for artifact-schema compatibility, but it now means one complete 10 MHz,
+24-RB carrier allocation. A 10/20/40 MHz system therefore supplies 1/2/4 such
+resources per slot. It must never again be interpreted as two 12-RB choices
+inside the 10 MHz carrier: the configured transport block consumes all 24 RB.
 """
 
 from __future__ import annotations
@@ -134,8 +140,9 @@ class CollisionParameters:
 DEFAULT_COMMITTED_AIRTIME_S = 1.5e-3
 
 
-#: The frozen profile: two 12-RB subchannels on 24 RB, a 100 ms selection
-#: window at 0.5 ms slots.
+#: The corrected headline profile: one full 10 MHz, 24-RB carrier allocation
+#: over a 100 ms selection window at 0.5 ms slots. ``subchannels`` remains the
+#: API name, but its physical unit is one complete carrier allocation.
 def headline_parameters(
     band: SensitivityBand = SensitivityBand.NOMINAL,
     *,
@@ -156,7 +163,7 @@ def headline_parameters(
         SensitivityBand.PESSIMISTIC: 0.70,
     }[band]
     return CollisionParameters(
-        subchannels=2,
+        subchannels=1,
         selection_window_slots=200,
         sensing_reliability=reliability,
         airtime_s=committed_airtime_s,
@@ -181,10 +188,10 @@ def resource_demand(neighbour_count: int, parameters: CollisionParameters) -> fl
     resources gives every vehicle what it asked for.
     :func:`collision_probability` cannot see this: the birthday model asks where
     *one* selection lands, not whether every selection can be honoured, so an
-    oversubscribed profile still reports a modest per-attempt collision. That is
-    how the headline profile came to sit at 1.19x demand at rho = 30 -- three
-    attempts against a pool that supplies 2.5 -- with nothing in the model
-    objecting.
+    oversubscribed profile still reports a modest per-attempt collision. Under
+    the corrected full-carrier contract the headline profile sits at 2.43x
+    demand at rho = 30 -- 162 neighbours each reserving three attempts against
+    200 resources -- with nothing in the birthday model objecting.
 
     Deliberately **not** clipped. :func:`channel_busy_ratio` clips because it
     feeds an observation vector, where a fraction above one is meaningless; this

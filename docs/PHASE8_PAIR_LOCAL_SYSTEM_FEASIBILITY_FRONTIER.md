@@ -1,12 +1,21 @@
 # Phase 8 pair-local system-feasibility frontier
 
-Status: complete; all 36 cells certified infeasible; training not authorized
+Status: complete historical sensitivity result; all 36 cells certified
+infeasible; its 10/20/40-MHz interpretation is superseded by the full-carrier
+allocation contract; training not authorized
 
 Date frozen: 2026-09-27
 
 Executor completed: 2026-09-28
 
 Frontier executed: 2026-09-28
+
+> **Supersession note (2026-09-28):** this immutable frontier counted two
+> 12-RB collision resources while each link-budget evaluation consumed all
+> 24 RB. Its result remains valid as a named 2/4/8-resource sensitivity study
+> and as provenance for the abstract RF-decoding scaling diagnostic, but those
+> resource counts no longer represent 10/20/40 MHz. The current physical
+> mapping is frozen in `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`.
 
 ## Decision this protocol will support
 

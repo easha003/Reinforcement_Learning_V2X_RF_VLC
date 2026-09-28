@@ -17,6 +17,9 @@ from hybrid_v2x_rl.config.loader import load_yaml_file
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DECLARATION_PATH = Path(
+    "configs/evaluation/full_carrier_system_feasibility_frontier.yaml"
+)
+LEGACY_DECLARATION_PATH = Path(
     "configs/evaluation/pair_local_system_feasibility_frontier.yaml"
 )
 
@@ -46,9 +49,9 @@ def test_canonical_declaration_expands_the_frozen_grid() -> None:
     assert declaration.environment_seed == 20260728
     assert declaration.selection_window_slots == 200
     assert [level.candidate_resources for level in declaration.rf_capacities] == [
+        200,
         400,
         800,
-        1600,
     ]
     assert [level.name for level in declaration.sensing_bands] == [
         "nominal",
@@ -66,6 +69,18 @@ def test_canonical_declaration_expands_the_frozen_grid() -> None:
     assert declaration.headline_point.point_id == (
         "rf-capacity-1x__wide-60deg__nominal"
     )
+
+
+def test_superseded_half_carrier_declaration_cannot_execute_as_current() -> None:
+    with pytest.raises(
+        SystemFeasibilityFrontierError,
+        match="headline RF capacity differs",
+    ):
+        load_system_feasibility_frontier_declaration(
+            LEGACY_DECLARATION_PATH,
+            project_root=PROJECT_ROOT,
+            verify_evidence=False,
+        )
 
 
 def test_only_contract_fallback_can_authorize_training() -> None:
@@ -110,7 +125,7 @@ def test_candidate_resource_arithmetic_is_fail_closed(tmp_path: Path) -> None:
     levels = rf_capacity["levels"]
     assert isinstance(levels, list)
     assert isinstance(levels[1], dict)
-    levels[1]["candidate_resources"] = 801
+    levels[1]["candidate_resources"] = 401
 
     with pytest.raises(SystemFeasibilityFrontierError, match="candidate resources"):
         load_system_feasibility_frontier_declaration(
