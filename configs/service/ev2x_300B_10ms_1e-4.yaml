@@ -1,0 +1,24 @@
+# Longer-block feasibility profile.
+#
+# This profile retains the 300-byte payload, 100-ms generation period, and
+# 1e-4 conditional-miss target.  It uses the upper end of the existing
+# 3--10 ms service envelope only for a bounded physical-layer feasibility
+# experiment.  It is not the repository headline and does not authorize PPO.
+
+project:
+  experiment: "longer-block-300B-10ms-1e-4"
+  description: "Validation-only longer-block RF feasibility frontier for the hybrid RF/VLC system"
+
+service:
+  payload_bytes: 300
+  generation_period_s: 0.1
+  deadline_s: 0.010
+  miss_budget: 0.0001
+  predecision_lead_s: 0.0001
+  harq_enabled: false
+  # Retained for the legacy lifecycle.  The live nine-action contract still
+  # permits RF-1 through RF-4 and the timing validator checks the larger value.
+  rf_attempts_per_packet: 3
+  vlc_attempts_per_packet: 1
+  dup_simultaneous: true
+  rf_resource_assumption: "pre_reserved"

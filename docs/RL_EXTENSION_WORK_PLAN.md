@@ -876,10 +876,19 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        frontier with the existing four-attempt/nine-action contract as the
        next intervention; PPO and the test split remain blocked. See
        `PHASE8_PROPAGATION_TAIL_DECOMPOSITION.md`.
-     - [ ] Predeclare the 300 B / 10 ms / `1e-4` longer-block RF frontier with
-       0.5, 1.0, 1.5, and 2.0 ms per-attempt candidates, validate each resource
-       grid, and run the propagation-only screen before any joint frontier or
-       PPO training.
+     - [ ] Complete the 300 B / 10 ms / `1e-4` longer-block RF frontier before
+       any joint frontier or PPO training. See
+       `PHASE8_LONGER_BLOCK_RF_FRONTIER.md`.
+       - [x] Freeze the 0.5, 1.0, 1.5, and 2.0 ms per-attempt candidates,
+         resource-grid expectations, headline MRC receiver, optical profiles,
+         validation windows, control-reuse rule, shortest-survivor rule, and
+         no-training/no-test boundary.
+       - [x] Implement fail-closed structural validation plus a candidate-level
+         resumable propagation-only executor without changing the nine-action,
+         four-attempt policy contract.
+       - [ ] Execute the frozen propagation screen, record the shortest
+         survivor if one exists, and authorize only that candidate for the
+         pair-local contention and half-duplex frontier.
 5. [x] Apply the reliability curriculum:
 
    ```text

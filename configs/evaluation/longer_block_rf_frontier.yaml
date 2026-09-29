@@ -1,0 +1,99 @@
+schema: "hybrid-rf-vlc-rl.longer-block-rf-frontier-declaration.v1"
+frozen_date: "2026-09-29"
+
+objective:
+  payload_bytes: 300
+  deadline_s: 0.010
+  predecision_lead_s: 0.0001
+  miss_budget: 0.0001
+  densities_vehicles_per_lane_km: [10.0, 20.0, 30.0]
+  required_split: "validation"
+  interpretation: "bounded propagation-only necessary-condition screen; not a system-feasibility or on-road reliability result"
+
+evidence:
+  propagation_tail_declaration:
+    path: "configs/evaluation/propagation_tail_decomposition.yaml"
+    sha256: "5584323a53d68ceb572c843bbe7b23f2445f1d5a79f9ad8a03ac73deba6f609a"
+  propagation_tail_result:
+    path: "artifacts/evaluations/phase8_propagation_tail_decomposition.json"
+    sha256: "fc7141c10877f841d24e16a18adbf306a7e273ceb525c9ffed21fdd7ac087e0f"
+    schema: "hybrid-rf-vlc-rl.propagation-tail-decomposition-result.v1"
+  receive_diversity_declaration:
+    path: "configs/evaluation/receive_diversity_system_feasibility_frontier.yaml"
+    sha256: "9f607285d9b1b65fc411a0e69d69975d7d1731086134e02cc8d3c3736690193e"
+  receive_diversity_result:
+    path: "artifacts/evaluations/phase8_receive_diversity_system_feasibility_frontier.json"
+    sha256: "eb5de3183f3022389d7a564976a502d2cbb853cbb9d9230ddcec37492dbd8879"
+    schema: "hybrid-rf-vlc-rl.receive-diversity-frontier-result.v1"
+  actor_used: false
+  checkpoint_used: false
+
+base_config_layers:
+  - "configs/project/default.yaml"
+  - "configs/mobility/synthetic_manhattan.yaml"
+  - "configs/service/ev2x_300B_10ms_1e-4.yaml"
+  - "configs/channel/rf_nr_v2x.yaml"
+  - "configs/channel/vlc_vehicle.yaml"
+  - "configs/observation/causal_200ms_forecast.yaml"
+  - "configs/training/primal_dual_ppo.yaml"
+  - "configs/evaluation/primary.yaml"
+
+selection:
+  receive_profile: "rx2-mrc__low-correlation-hardware-bound__short-cable-loss"
+  optical_configurations: ["wide-60deg", "concentrated-30deg"]
+  candidates:
+    - name: "16qam-0p5ms-control"
+      role: "control"
+      modulation: "16qam"
+      airtime_s: 0.0005
+      gross_bit_rate_bps: 18000000.0
+      code_rate: 0.333333
+      expected_slots: 1
+      expected_available_coded_bits: 9676.8
+      expected_channel_uses: 2419
+      expected_rf4_airtime_s: 0.002
+    - name: "qpsk-1p0ms-primary"
+      role: "primary"
+      modulation: "qpsk"
+      airtime_s: 0.001
+      gross_bit_rate_bps: 9000000.0
+      code_rate: 0.333333
+      expected_slots: 2
+      expected_available_coded_bits: 9676.8
+      expected_channel_uses: 4838
+      expected_rf4_airtime_s: 0.004
+    - name: "qpsk-1p5ms-sensitivity"
+      role: "sensitivity"
+      modulation: "qpsk"
+      airtime_s: 0.0015
+      gross_bit_rate_bps: 9000000.0
+      code_rate: 0.333333
+      expected_slots: 3
+      expected_available_coded_bits: 14515.2
+      expected_channel_uses: 7257
+      expected_rf4_airtime_s: 0.006
+    - name: "qpsk-2p0ms-sensitivity"
+      role: "sensitivity"
+      modulation: "qpsk"
+      airtime_s: 0.002
+      gross_bit_rate_bps: 9000000.0
+      code_rate: 0.333333
+      expected_slots: 4
+      expected_available_coded_bits: 19353.6
+      expected_channel_uses: 9676
+      expected_rf4_airtime_s: 0.008
+
+execution:
+  control_reuse_rule: "reuse the hash-verified headline receive-diversity propagation rows because deadline alone does not enter propagation or decoding"
+  candidate_order: "increasing per-attempt airtime"
+  selection_rule: "select the shortest candidate meeting the miss budget at every density for at least one frozen optical configuration"
+  next_stage_rule: "only a propagation survivor may enter the pair-local contention and half-duplex frontier"
+  no_adaptive_axis_expansion: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_longer_block_rf_frontier.json"
+
+decision:
+  action_contract: "retain the canonical nine actions and maximum four RF attempts"
+  training_authorization: false
+  claim_boundary: "validation-only conditional synthetic propagation evidence; passing is necessary but not sufficient for system feasibility"
