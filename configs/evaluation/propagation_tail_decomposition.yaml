@@ -1,0 +1,41 @@
+schema: "hybrid-rf-vlc-rl.propagation-tail-decomposition-declaration.v1"
+frozen_date: "2026-09-29"
+
+objective:
+  miss_budget: 0.0001
+  densities_vehicles_per_lane_km: [20.0, 30.0]
+  required_split: "validation"
+  interpretation: "bounded diagnosis of the failed propagation-only necessary condition; not a feasibility result"
+
+evidence:
+  receive_diversity_declaration:
+    path: "configs/evaluation/receive_diversity_system_feasibility_frontier.yaml"
+    sha256: "9f607285d9b1b65fc411a0e69d69975d7d1731086134e02cc8d3c3736690193e"
+  receive_diversity_result:
+    path: "artifacts/evaluations/phase8_receive_diversity_system_feasibility_frontier.json"
+    sha256: "eb5de3183f3022389d7a564976a502d2cbb853cbb9d9230ddcec37492dbd8879"
+    schema: "hybrid-rf-vlc-rl.receive-diversity-frontier-result.v1"
+  actor_used: false
+  checkpoint_used: false
+
+selection:
+  receive_profile: "rx2-mrc__low-correlation-hardware-bound__short-cable-loss"
+  optical_configurations: ["wide-60deg", "concentrated-30deg"]
+  fallback_view: "contract"
+  dimensions:
+    - "lower_bound_action"
+    - "actor_control_status"
+    - "rf_propagation_state"
+    - "vlc_geometric_availability"
+  risk_tail_thresholds: [0.00000001, 0.000001, 0.0001, 0.001, 0.01]
+
+execution:
+  no_adaptive_axis_expansion: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_propagation_tail_decomposition.json"
+
+decision:
+  purpose: "identify the physical mechanism to target before declaring a 10 ms intervention"
+  training_authorization: false
+  claim_boundary: "validation-only conditional synthetic diagnosis; it cannot establish on-road reliability"

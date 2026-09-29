@@ -865,11 +865,21 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
            joint grid is therefore empty, training is not authorized, and the
            test split remains closed. See
            `PHASE8_RECEIVE_DIVERSITY_EXECUTION.md`.
-     - [ ] Decompose the failing density-20 and density-30 propagation tails by
+     - [x] Decompose the failing density-20 and density-30 propagation tails by
        selected lower-bound action, actor usability/fallback status, RF
-       propagation class, and VLC availability. Use that bounded validation
-       diagnosis to choose and freeze the next physically interpretable
-       intervention; do not begin PPO or open the test split.
+       propagation class, and VLC availability. The bounded replay exactly
+       reproduces all four source means. At density 20, 16 of 23,204 rows carry
+       effectively all risk; at density 30, 12 of 38,484 do. Every material
+       row is actor-usable, selects `RF-4`, is RF NLOS, and has geometrically
+       unavailable VLC. Wide and concentrated optical profiles have identical
+       limiting means. This selects a predeclared 10 ms longer-block RF
+       frontier with the existing four-attempt/nine-action contract as the
+       next intervention; PPO and the test split remain blocked. See
+       `PHASE8_PROPAGATION_TAIL_DECOMPOSITION.md`.
+     - [ ] Predeclare the 300 B / 10 ms / `1e-4` longer-block RF frontier with
+       0.5, 1.0, 1.5, and 2.0 ms per-attempt candidates, validate each resource
+       grid, and run the propagation-only screen before any joint frontier or
+       PPO training.
 5. [x] Apply the reliability curriculum:
 
    ```text
