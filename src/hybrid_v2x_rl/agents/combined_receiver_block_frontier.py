@@ -914,6 +914,16 @@ class CombinedReceiverBlockResult:
     def decision(self) -> dict[str, object]:
         exact_pairs = _candidate_pairs(self.declaration, self.profile_results, exact=True)
         near_pairs = _candidate_pairs(self.declaration, self.profile_results, exact=False)
+        all_pairs = tuple(
+            (result, optical)
+            for result in self.profile_results
+            for optical in self.declaration.optical_configuration_names
+        )
+        best_observed = min(
+            all_pairs,
+            key=lambda pair: _pair_rank(self.declaration, pair),
+        )
+        best_observed_rank = _pair_rank(self.declaration, best_observed)
         selection_basis: str | None
         selected: tuple[CombinedProfileResult, str] | None
         if exact_pairs:
@@ -947,13 +957,28 @@ class CombinedReceiverBlockResult:
             "selection_basis": selection_basis,
             "selected_worst_density_mean": rank[0] if rank is not None else None,
             "selected_average_density_mean": rank[1] if rank is not None else None,
+            "best_observed_receive_profile_name": (best_observed[0].combined_profile.profile.name),
+            "best_observed_receive_profile_role": best_observed[0].combined_profile.role,
+            "best_observed_optical_configuration_name": best_observed[1],
+            "best_observed_worst_density_mean": best_observed_rank[0],
+            "best_observed_average_density_mean": best_observed_rank[1],
+            "best_observed_exact_budget_multiple": (
+                best_observed_rank[0] / self.declaration.miss_budget
+            ),
+            "best_observed_near_budget_multiple": (
+                best_observed_rank[0] / self.declaration.near_budget
+            ),
             "joint_contention_frontier_authorized": selected is not None,
             "training_authorized": False,
             "test_split_opened": False,
             "next_action": (
                 self.declaration.next_stage_rule
                 if selected is not None
-                else "combined receiver/block intervention exceeds the frozen 10% near margin; stop before PPO"
+                else (
+                    "combined receiver/block intervention exceeds the frozen 10% near margin; "
+                    "stop before PPO unless the user explicitly authorizes a separately labeled "
+                    "exploratory override using the best-observed pair"
+                )
             ),
             "claim_boundary": (
                 "an exploratory-near selection is not exact 1e-4 feasibility; "

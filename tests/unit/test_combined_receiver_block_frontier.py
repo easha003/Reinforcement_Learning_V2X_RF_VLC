@@ -210,6 +210,8 @@ def test_above_near_margin_stops_before_joint_frontier() -> None:
 
     decision = result.decision()
     assert decision["selection_basis"] is None
+    assert decision["best_observed_receive_profile_role"] == "optimistic-sensitivity"
+    assert decision["best_observed_worst_density_mean"] == pytest.approx(1.11e-4)
     assert decision["joint_contention_frontier_authorized"] is False
     assert decision["training_authorized"] is False
 
