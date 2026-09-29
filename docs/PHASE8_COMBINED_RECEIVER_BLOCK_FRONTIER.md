@@ -1,6 +1,8 @@
 # Phase 8 combined receiver/block frontier
 
-Status: declared and implemented; validation execution pending
+Status: completed; no profile reaches the exact target or frozen 10%-over
+exploratory gate, so the joint frontier and PPO remain blocked pending an
+explicit exploratory override
 
 ## Purpose
 
@@ -69,3 +71,46 @@ Execute or resume the validation-only propagation screen:
 The executor checkpoints after every completed receive profile and writes the
 final result to
 `artifacts/evaluations/phase8_combined_receiver_block_frontier.json`.
+
+## Completed validation result
+
+The declaration SHA-256 is
+`566fef2e20eeb628efe3565160349913300dc57b04800edbc9e9faf74be0667c`.
+The completed result SHA-256 is
+`3dfbc332123ff2c202af36e02e69d6be38ae4231364a127638564c8e0c2445f3`.
+The screen evaluated all 18 declared profile/optical/density rows. Both optical
+configurations have the same material density-20 result:
+
+| Integrated zero-loss MRC profile | Density 10 | Density 20 | Density 30 | Exact | Within 10% |
+|---|---:|---:|---:|---:|---:|
+| Independent ideal | `5.24e-61` | `1.182919e-4` | `1.80e-61` | no | no |
+| Low-correlation hardware bound | `5.24e-61` | `1.292880e-4` | `1.80e-61` | no | no |
+| Correlated stress | `5.24e-61` | `2.154571e-4` | `1.80e-61` | no | no |
+
+The independent-ideal result is the best observed pair. It improves the prior
+2.0 ms headline-receiver density-20 lower bound by approximately 31.4%, but it
+remains 18.29% above the exact target and 7.54% above the frozen `1.1e-4`
+exploratory boundary. The hardware-primary profile improves the prior result
+by 25.0% but remains 29.29% above target. Correlation sensitivity is material:
+the correlated-stress result is more than twice the target.
+
+The best-observed pair is the independent-ideal zero-loss receiver with the
+wide optical configuration under the frozen tie-break, although the wide and
+concentrated density-20 values are identical. Because the profile is an
+optimistic sensitivity assumption rather than the hardware-primary model, any
+continuation with it requires especially explicit claim boundaries.
+
+## Decision
+
+No exact or predeclared near-feasible pair exists. The result therefore does
+not automatically authorize the pair-local joint contention frontier or PPO.
+Widening the 10% margin after observing the result would be a post-hoc change,
+so the frozen result is retained unchanged.
+
+If work continues with the best observed pair, it must be recorded as a
+user-directed exploratory override. The next computation would be the
+pair-local joint contention and half-duplex frontier for that single frozen
+pair—not PPO immediately—because the propagation-only value is optimistic and
+the joint losses can only worsen it. Training after that characterization may
+study policy behavior, but it cannot be described as meeting the `1e-4`
+reliability constraint.

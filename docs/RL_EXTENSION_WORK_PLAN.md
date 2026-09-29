@@ -914,7 +914,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          task is a predeclared propagation-only screen combining the
          grid-realizable 2.0 ms QPSK block with all three already-frozen
          integrated zero-loss MRC correlation profiles.
-     - [ ] Complete the combined 2.0 ms QPSK and integrated zero-loss MRC
+     - [x] Complete the combined 2.0 ms QPSK and integrated zero-loss MRC
        propagation frontier before any new joint experiment or PPO run. See
        `PHASE8_COMBINED_RECEIVER_BLOCK_FRONTIER.md`.
        - [x] Freeze all three existing correlation profiles, both optical
@@ -926,9 +926,18 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        - [x] Implement fail-closed structural validation, complete-grid
          propagation replay, profile-level resume checkpoints, and separate
          exact/near decisions. PPO and the test split remain closed.
-       - [ ] Execute the three-profile screen. If an exact or exploratory-near
+       - [x] Execute the three-profile screen. If an exact or exploratory-near
          pair exists, send only the frozen best pair to the pair-local joint
-         contention frontier before deciding whether to resume PPO.
+         contention frontier before deciding whether to resume PPO. No pair
+         reaches either gate. The independent-ideal zero-loss profile is best
+         at density 20 with `1.182919e-4`: 18.29% above the exact target and
+         7.54% above the frozen near boundary. The hardware-primary profile
+         reaches `1.292880e-4`, while correlated stress reaches
+         `2.154571e-4`. Densities 10 and 30 pass for every profile.
+     - [ ] Decide whether to stop at the frozen 10% boundary or record a
+       user-directed exploratory override selecting the independent-ideal
+       zero-loss/wide-optical pair. Under an override, run its pair-local joint
+       contention frontier before PPO and never claim that it meets `1e-4`.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1268,6 +1277,11 @@ deadline-edge threshold screen is now complete: its best possible continuous
 mean at 2.475 ms is `1.294405e-4`, so no threshold passes and the current
 full-slot grid also remains infeasible. The next minimal task is to predeclare
 a combined 2.0 ms QPSK plus integrated zero-loss two-branch MRC propagation
-screen across all three previously frozen correlation levels. No joint
-contention experiment or PPO run is authorized unless that necessary condition
-passes.
+screen across all three previously frozen correlation levels. That combined
+screen is now complete. Its best pair, independent-ideal zero-loss MRC at 2.0
+ms QPSK, reaches `1.182919e-4`; the hardware-primary pair reaches
+`1.292880e-4`. Neither the exact target nor the frozen 10%-over exploratory
+gate passes. No joint contention experiment or PPO run is automatically
+authorized. Continuing with the best pair now requires a clearly recorded
+user-directed exploratory override, followed by the pair-local joint frontier
+before training.
