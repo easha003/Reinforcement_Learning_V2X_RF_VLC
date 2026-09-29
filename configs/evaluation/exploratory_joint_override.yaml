@@ -1,0 +1,57 @@
+schema: "hybrid-rf-vlc-rl.exploratory-joint-override-declaration.v1"
+frozen_date: "2026-09-29"
+
+objective:
+  payload_bytes: 300
+  deadline_s: 0.010
+  exact_miss_budget: 0.0001
+  required_split: "validation"
+  interpretation: "user-directed exploratory joint characterization; not an exact-feasibility experiment"
+
+evidence:
+  combined_declaration:
+    path: "configs/evaluation/combined_receiver_block_frontier.yaml"
+    sha256: "566fef2e20eeb628efe3565160349913300dc57b04800edbc9e9faf74be0667c"
+  combined_result:
+    path: "artifacts/evaluations/phase8_combined_receiver_block_frontier.json"
+    sha256: "3dfbc332123ff2c202af36e02e69d6be38ae4231364a127638564c8e0c2445f3"
+    schema: "hybrid-rf-vlc-rl.combined-receiver-block-frontier-result.v1"
+  source_joint_frontier:
+    path: "configs/evaluation/full_carrier_system_feasibility_frontier.yaml"
+    sha256: "60718bcdead081ad77b794ef64daadb054fb8c0fa2f052fbe4334f67a82d99c7"
+  user_directed_exploratory_override: true
+  actor_used: false
+  checkpoint_used: false
+
+selected_pair:
+  rf_candidate: "qpsk-2p0ms-sensitivity"
+  receive_profile: "rx2-mrc__independent-ideal__integrated-zero-loss"
+  receive_profile_role: "optimistic-sensitivity"
+  optical_configuration: "wide-60deg"
+  propagation_only_worst_density_mean: 0.0001182919226271053
+  propagation_only_exact_budget_multiple: 1.1829192262710528
+  exact_target_met: false
+  selection_basis: "best-observed pair under the frozen combined-frontier ranking"
+
+joint_characterization:
+  rf_capacity: "rf-capacity-4x"
+  sensing_bands: ["nominal", "pessimistic", "optimistic"]
+  fallback_view: "contract-dup4"
+  densities_vehicles_per_lane_km: [10.0, 20.0, 30.0]
+  validation_windows: 9
+  expected_cells: 3
+  exact_assignment_cap: 100000
+  max_search_iterations: 16
+  capacity_selection_reason: "maximum already-declared full-carrier capacity, chosen before execution to prioritize the best attainable exploratory reliability"
+
+execution:
+  no_adaptive_axis_expansion: true
+  no_training_during_characterization: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_exploratory_joint_override.json"
+
+decision:
+  exact_feasibility_claim_allowed: false
+  exploratory_training_after_joint_characterization: true
+  selected_training_sensing_band: "nominal"
+  claim_boundary: "training may study policy behavior under the best exploratory configuration but must not be reported as satisfying the 1e-4 reliability target"

@@ -934,10 +934,26 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          7.54% above the frozen near boundary. The hardware-primary profile
          reaches `1.292880e-4`, while correlated stress reaches
          `2.154571e-4`. Densities 10 and 30 pass for every profile.
-     - [ ] Decide whether to stop at the frozen 10% boundary or record a
+     - [x] Decide whether to stop at the frozen 10% boundary or record a
        user-directed exploratory override selecting the independent-ideal
        zero-loss/wide-optical pair. Under an override, run its pair-local joint
        contention frontier before PPO and never claim that it meets `1e-4`.
+       The user authorized the exploratory override on 2026-09-29.
+     - [ ] Complete the selected pair's exploratory pair-local joint
+       characterization before resuming PPO. See
+       `PHASE8_EXPLORATORY_JOINT_OVERRIDE.md`.
+       - [x] Freeze the selected 2.0 ms QPSK, independent-ideal zero-loss MRC,
+         wide-optical pair and preserve its failed `1e-4` provenance.
+       - [x] Freeze the already-declared maximum 4x full-carrier capacity,
+         nominal/pessimistic/optimistic sensing bands, contract fallback, all
+         validation densities/windows, and the explicit exploratory claim
+         boundary.
+       - [x] Implement fail-closed structural validation, resumable joint-cell
+         evaluation, exact verdict reporting, and a separate user-directed
+         exploratory-training authorization.
+       - [ ] Execute all three joint cells, record the nominal training-cell
+         floor and sensing sensitivity, then freeze the exploratory PPO
+         physical/training profile without opening the test split.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1281,7 +1297,9 @@ screen across all three previously frozen correlation levels. That combined
 screen is now complete. Its best pair, independent-ideal zero-loss MRC at 2.0
 ms QPSK, reaches `1.182919e-4`; the hardware-primary pair reaches
 `1.292880e-4`. Neither the exact target nor the frozen 10%-over exploratory
-gate passes. No joint contention experiment or PPO run is automatically
-authorized. Continuing with the best pair now requires a clearly recorded
-user-directed exploratory override, followed by the pair-local joint frontier
-before training.
+gate passes. The user has now explicitly authorized a separately labeled
+exploratory continuation with the best pair. Its three-cell pair-local joint
+characterization is declared and implemented at the maximum already-declared
+full-carrier capacity across all sensing bands. PPO and the test split remain
+closed until that joint characterization is complete and its nominal training
+profile is frozen.
