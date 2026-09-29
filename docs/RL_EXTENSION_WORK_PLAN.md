@@ -939,7 +939,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        zero-loss/wide-optical pair. Under an override, run its pair-local joint
        contention frontier before PPO and never claim that it meets `1e-4`.
        The user authorized the exploratory override on 2026-09-29.
-     - [ ] Complete the selected pair's exploratory pair-local joint
+     - [x] Complete the selected pair's exploratory pair-local joint
        characterization before resuming PPO. See
        `PHASE8_EXPLORATORY_JOINT_OVERRIDE.md`.
        - [x] Freeze the selected 2.0 ms QPSK, independent-ideal zero-loss MRC,
@@ -951,9 +951,20 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        - [x] Implement fail-closed structural validation, resumable joint-cell
          evaluation, exact verdict reporting, and a separate user-directed
          exploratory-training authorization.
-       - [ ] Execute all three joint cells, record the nominal training-cell
+       - [x] Execute all three joint cells, record the nominal training-cell
          floor and sensing sensitivity, then freeze the exploratory PPO
-         physical/training profile without opening the test split.
+         physical/training profile without opening the test split. The
+         optimistic, nominal, and pessimistic worst-density candidate means are
+         `1.245986e-2`, `1.303173e-2`, and `1.391849e-2`. Density 20 is proven
+         infeasible in every cell; the nominal cell is 130.32 times the exact
+         target. The override nevertheless authorizes separately labeled
+         exploratory training, not an exact-feasibility claim.
+     - [ ] Freeze the exact nominal exploratory PPO configuration—2.0 ms QPSK,
+       independent-ideal zero-loss MRC, wide optical, 4x full-carrier capacity,
+       nominal sensing, and contract fallback—then run a bounded smoke campaign
+       before any full multi-seed training. Evaluate learning against the
+       realizable joint oracle rather than claiming that PPO can reach
+       `1e-4`; keep the test split closed.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1299,7 +1310,9 @@ ms QPSK, reaches `1.182919e-4`; the hardware-primary pair reaches
 `1.292880e-4`. Neither the exact target nor the frozen 10%-over exploratory
 gate passes. The user has now explicitly authorized a separately labeled
 exploratory continuation with the best pair. Its three-cell pair-local joint
-characterization is declared and implemented at the maximum already-declared
-full-carrier capacity across all sensing bands. PPO and the test split remain
-closed until that joint characterization is complete and its nominal training
-profile is frozen.
+characterization is complete at the maximum already-declared full-carrier
+capacity. The nominal realizable worst-density mean is `1.303173e-2`, about
+130.32 times the target, and density 20 is certified infeasible. Exploratory
+PPO remains authorized only to study hybrid-policy learning and oracle gap, not
+to claim `1e-4`. The immediate task is to freeze that exact nominal training
+profile and pass a bounded smoke campaign while the test split stays closed.
