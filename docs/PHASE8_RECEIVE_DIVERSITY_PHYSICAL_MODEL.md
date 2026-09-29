@@ -1,8 +1,8 @@
 # Phase 8 receive-diversity physical model
 
-Status: implementation and structural wiring complete; the resumable
-two-stage feasibility executor is validated and execution is in progress; PPO
-training remains blocked
+Status: implementation, structural wiring, and bounded feasibility execution
+complete; all receive profiles fail the propagation screen and PPO remains
+blocked
 
 Date completed: 2026-09-28
 
@@ -120,8 +120,8 @@ these tests.
 ## Next task
 
 The frozen propagation-only necessary-condition screen and certificate-aware
-joint executor are implemented; see `PHASE8_RECEIVE_DIVERSITY_EXECUTION.md`.
-The immediate task is to complete that bounded validation run, inspect its
-certificate-aware result, and leave PPO and the held-out test split blocked
-unless the headline receive profile passes its full authorization gate. The
-one-hour monitoring interval applies to the CPU execution.
+joint executor are implemented and complete; see
+`PHASE8_RECEIVE_DIVERSITY_EXECUTION.md`. No receive profile survives the
+screen, so the joint stage contains zero cells. PPO and the held-out test split
+remain blocked. The next task is to decompose the failing propagation tails
+before declaring another physical intervention.

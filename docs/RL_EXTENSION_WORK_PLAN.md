@@ -797,7 +797,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        `2.271923e-4`, `6.895343e-4`, and `3.897709e-4` at densities 10, 20,
        and 30, respectively, so the next intervention must change per-link or
        architecture-level reliability rather than PPO hyperparameters.
-   - [ ] Predeclare an architecture-level reliability frontier that changes a
+   - [x] Predeclare an architecture-level reliability frontier that changes a
      mechanism capable of lowering the certified propagation floor. Quantify
      the required per-link improvement first; then bound physically
      interpretable RF-link and/or optical-diversity interventions. Keep PPO
@@ -812,7 +812,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        declared `2x` point. The limiting continuous optimistic threshold is
        `1.620462x` at density 20. Training remains blocked because contention
        and half-duplex risk were intentionally excluded.
-     - [ ] Translate the required RF decoding improvement into physically
+     - [x] Translate the required RF decoding improvement into physically
        interpretable link configurations with explicit coding, MCS, power, or
        independent-diversity assumptions. Freeze the configurations and their
        calibration evidence before running another certificate-aware joint
@@ -832,7 +832,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          diversity. The corrected 36-cell declaration passed its structural
          dry run without evaluating frames. See
          `PHASE8_FULL_CARRIER_ALLOCATION_CONTRACT.md`.
-       - [ ] Complete the calibrated independent receive-diversity frontier
+       - [x] Complete the calibrated independent receive-diversity frontier
          and re-run only the affected certificate-aware feasibility evidence;
          mobility traces and completed state audits remain reusable.
          - [x] Freeze a literature-bounded SISO control plus two-branch MRC
@@ -854,9 +854,22 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
            The structural validator instantiates 180 physical combinations
            without evaluating a frame. See
            `PHASE8_RECEIVE_DIVERSITY_PHYSICAL_MODEL.md`.
-         - [ ] Execute the propagation screen and certificate-aware frontier,
+         - [x] Execute the propagation screen and certificate-aware frontier,
            retain every candidate/lower-bound gap, and apply the frozen
            headline-profile authorization rule before any new PPO seed.
+           The roughly 2-hour-50-minute validation run screens all ten
+           profiles and finds zero survivors. Every MRC profile passes density
+           10 but fails densities 20 and 30. The headline lower bounds are
+           `6.464405e-4` and `2.895417e-4`, respectively; even the best
+           declared zero-loss sensitivities remain above budget. The surviving
+           joint grid is therefore empty, training is not authorized, and the
+           test split remains closed. See
+           `PHASE8_RECEIVE_DIVERSITY_EXECUTION.md`.
+     - [ ] Decompose the failing density-20 and density-30 propagation tails by
+       selected lower-bound action, actor usability/fallback status, RF
+       propagation class, and VLC availability. Use that bounded validation
+       diagnosis to choose and freeze the next physically interpretable
+       intervention; do not begin PPO or open the test split.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1181,9 +1194,10 @@ joint space. Larger frames publish a realizable candidate, a certified
 zero-contention lower bound, and the remaining optimality gap. The bounded
 pair-local frontier and RF-scaling diagnosis are now complete, and the
 full-carrier allocation correction plus receive-diversity experiment
-declaration and physical model are frozen. The resumable two-stage executor is
-now implemented and structurally validated. The current task is its bounded
-validation execution: the predeclared propagation-only screen followed by the
-certificate-aware joint frontier for every surviving receive profile. No PPO
-training is authorized until the receive-diversity gate yields a feasible
-headline design.
+declaration, physical model, and resumable executor are complete. The bounded
+propagation screen eliminates all ten receive profiles: every MRC profile
+passes density 10 but fails densities 20 and 30, including headline bounds of
+`6.464405e-4` and `2.895417e-4`. The survivor grid is empty, so no joint cells
+run, the test split remains closed, and PPO remains unauthorized. The immediate
+next task is a bounded propagation-tail decomposition to identify which
+physical mechanism must change before freezing another feasibility frontier.
