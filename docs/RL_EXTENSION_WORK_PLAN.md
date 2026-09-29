@@ -894,9 +894,20 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          20 remains 1.724 times over budget. No joint cell or PPO run is
          authorized.
      - [ ] Diagnose the residual density-20 tail for the 2.0 ms QPSK candidate
-       and predeclare a deadline-edge blocklength threshold screen bounded by
+       and complete the deadline-edge blocklength threshold screen bounded by
        2.475 ms per attempt before adding any new candidate or changing the
-       physical intervention.
+       physical intervention. See
+       `PHASE8_DEADLINE_EDGE_BLOCKLENGTH_THRESHOLD.md`.
+       - [x] Freeze the density-20 source row, paired replay, five threshold
+         anchors, exact integer-channel-use search, evidence hashes, and
+         no-training/no-test boundary.
+       - [x] Implement fail-closed source reproduction, residual-tail
+         decomposition, resumable optical-profile execution, and explicit
+         continuous-deadline versus full-slot-grid decisions.
+       - [ ] Execute both frozen optical profiles, record the exact first
+         passing threshold if it exists, and select the next physical step
+         without opening the joint frontier unless the current slot grid also
+         passes.
 5. [x] Apply the reliability curriculum:
 
    ```text

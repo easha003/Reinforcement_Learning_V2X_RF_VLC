@@ -1,0 +1,64 @@
+schema: "hybrid-rf-vlc-rl.deadline-edge-blocklength-threshold-declaration.v1"
+frozen_date: "2026-09-29"
+
+objective:
+  payload_bytes: 300
+  deadline_s: 0.010
+  predecision_lead_s: 0.0001
+  miss_budget: 0.0001
+  density_vehicles_per_lane_km: 20.0
+  required_split: "validation"
+  interpretation: "residual-tail diagnosis and theoretical blocklength threshold; not a deployable-grid or system-feasibility result"
+
+evidence:
+  longer_block_declaration:
+    path: "configs/evaluation/longer_block_rf_frontier.yaml"
+    sha256: "3db9bceffd82a7251cff813499a94e5513c40c4edfd1dd0be2e9f197904239e6"
+  longer_block_result:
+    path: "artifacts/evaluations/phase8_longer_block_rf_frontier.json"
+    sha256: "80433fc1733bfc5c25be183b0e853d15cb594f03570326c25be3ae5c302052b4"
+    schema: "hybrid-rf-vlc-rl.longer-block-rf-frontier-result.v1"
+  actor_used: false
+  checkpoint_used: false
+
+selection:
+  source_candidate: "qpsk-2p0ms-sensitivity"
+  receive_profile: "rx2-mrc__low-correlation-hardware-bound__short-cable-loss"
+  optical_configurations: ["wide-60deg", "concentrated-30deg"]
+  decomposition_dimensions:
+    - "lower_bound_action"
+    - "actor_control_status"
+    - "rf_propagation_state"
+    - "vlc_geometric_availability"
+  risk_tail_thresholds: [0.00000001, 0.000001, 0.0001, 0.001, 0.01]
+
+threshold_screen:
+  lower_airtime_s: 0.002
+  upper_airtime_s: 0.002475
+  lower_channel_uses: 9676
+  upper_channel_uses: 11975
+  data_channel_uses_per_second: 4838400.0
+  anchor_airtimes_s: [0.002, 0.002125, 0.00225, 0.002375, 0.002475]
+  anchor_channel_uses: [9676, 10281, 10886, 11491, 11975]
+  search_rule: "exact monotone integer-channel-use bisection over every frozen row"
+
+grid_realizability:
+  slot_s: 0.0005
+  current_full_slots_per_attempt: 4
+  next_full_slots_per_attempt: 5
+  next_full_slot_airtime_s: 0.0025
+  next_full_slot_rf4_airtime_s: 0.010
+  maximum_rf4_airtime_s: 0.0099
+  interpretation: "thresholds above 2.0 ms are theoretical under the current full-slot contract; no fifth full slot fits"
+
+execution:
+  no_adaptive_axis_expansion: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_deadline_edge_blocklength_threshold.json"
+
+decision:
+  joint_frontier_authorization: false
+  training_authorization: false
+  next_rule: "if the theoretical boundary passes but requires more than four full slots, predeclare a timing/numerology intervention before any joint frontier"
+  claim_boundary: "validation-only synthetic threshold under the optimistic finite-blocklength model"
