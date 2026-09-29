@@ -914,6 +914,21 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          task is a predeclared propagation-only screen combining the
          grid-realizable 2.0 ms QPSK block with all three already-frozen
          integrated zero-loss MRC correlation profiles.
+     - [ ] Complete the combined 2.0 ms QPSK and integrated zero-loss MRC
+       propagation frontier before any new joint experiment or PPO run. See
+       `PHASE8_COMBINED_RECEIVER_BLOCK_FRONTIER.md`.
+       - [x] Freeze all three existing correlation profiles, both optical
+         configurations, all validation densities/windows, and the
+         worst-density-first selection rule without adding new physics.
+       - [x] Freeze the exact `1e-4` scientific gate separately from a 10%
+         exploratory near-feasible gate at `1.1e-4`; a near selection must
+         never be reported as satisfying the target.
+       - [x] Implement fail-closed structural validation, complete-grid
+         propagation replay, profile-level resume checkpoints, and separate
+         exact/near decisions. PPO and the test split remain closed.
+       - [ ] Execute the three-profile screen. If an exact or exploratory-near
+         pair exists, send only the frozen best pair to the pair-local joint
+         contention frontier before deciding whether to resume PPO.
 5. [x] Apply the reliability curriculum:
 
    ```text

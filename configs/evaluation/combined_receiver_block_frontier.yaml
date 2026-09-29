@@ -1,0 +1,66 @@
+schema: "hybrid-rf-vlc-rl.combined-receiver-block-frontier-declaration.v1"
+frozen_date: "2026-09-29"
+
+objective:
+  payload_bytes: 300
+  deadline_s: 0.010
+  miss_budget: 0.0001
+  exploratory_near_budget: 0.00011
+  maximum_relative_excess: 0.10
+  densities_vehicles_per_lane_km: [10.0, 20.0, 30.0]
+  required_split: "validation"
+  interpretation: "propagation-only necessary-condition screen; exact and exploratory-near-feasible conclusions remain distinct"
+
+evidence:
+  receive_diversity_declaration:
+    path: "configs/evaluation/receive_diversity_system_feasibility_frontier.yaml"
+    sha256: "9f607285d9b1b65fc411a0e69d69975d7d1731086134e02cc8d3c3736690193e"
+  receive_diversity_result:
+    path: "artifacts/evaluations/phase8_receive_diversity_system_feasibility_frontier.json"
+    sha256: "eb5de3183f3022389d7a564976a502d2cbb853cbb9d9230ddcec37492dbd8879"
+    schema: "hybrid-rf-vlc-rl.receive-diversity-frontier-result.v1"
+  longer_block_declaration:
+    path: "configs/evaluation/longer_block_rf_frontier.yaml"
+    sha256: "3db9bceffd82a7251cff813499a94e5513c40c4edfd1dd0be2e9f197904239e6"
+  longer_block_result:
+    path: "artifacts/evaluations/phase8_longer_block_rf_frontier.json"
+    sha256: "80433fc1733bfc5c25be183b0e853d15cb594f03570326c25be3ae5c302052b4"
+    schema: "hybrid-rf-vlc-rl.longer-block-rf-frontier-result.v1"
+  deadline_edge_declaration:
+    path: "configs/evaluation/deadline_edge_blocklength_threshold.yaml"
+    sha256: "c0d257353d5582ec9958727e2806a44b6fcd97e4068a0cf5687253b402f3607e"
+  deadline_edge_result:
+    path: "artifacts/evaluations/phase8_deadline_edge_blocklength_threshold.json"
+    sha256: "6527d511a62b73da7f1a70617b471365ad03f131522409a00e2d96df60913a62"
+    schema: "hybrid-rf-vlc-rl.deadline-edge-blocklength-threshold-result.v1"
+  actor_used: false
+  checkpoint_used: false
+
+selection:
+  rf_candidate: "qpsk-2p0ms-sensitivity"
+  receive_profiles:
+    - name: "rx2-mrc__independent-ideal__integrated-zero-loss"
+      role: "optimistic-sensitivity"
+    - name: "rx2-mrc__low-correlation-hardware-bound__integrated-zero-loss"
+      role: "hardware-primary"
+    - name: "rx2-mrc__correlated-stress__integrated-zero-loss"
+      role: "correlated-sensitivity"
+  optical_configurations: ["wide-60deg", "concentrated-30deg"]
+  selection_rule: "minimize worst-density mean risk, then mean risk, receive-profile order, and optical order"
+
+execution:
+  stage: "evaluate every profile, optical configuration, density, and frozen validation window before selection"
+  exact_rule: "one receive-profile/optical pair must meet 1e-4 at every density"
+  exploratory_near_rule: "when no exact pair exists, one pair must meet 1.1e-4 at every density"
+  next_stage_rule: "selected exact or exploratory-near pair proceeds to the pair-local joint contention frontier; PPO remains blocked until that frontier is characterized"
+  no_adaptive_axis_expansion: true
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_combined_receiver_block_frontier.json"
+
+decision:
+  exact_target_remains_primary: true
+  exploratory_near_path_is_not_feasibility: true
+  training_authorization: false
+  sensitivity_profiles_may_be_selected_only_under_the_frozen_rule: true
+  claim_boundary: "validation-only synthetic propagation evidence; a near-feasible selection does not satisfy or prove the 1e-4 target"
