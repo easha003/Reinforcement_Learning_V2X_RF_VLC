@@ -1,7 +1,7 @@
 # Phase 8 longer-block RF frontier
 
-Status: frozen declaration and resumable propagation-only executor implemented;
-validation execution pending
+Status: completed; no candidate meets the propagation-only necessary condition
+at every density, so the joint frontier and PPO remain blocked
 
 ## Purpose
 
@@ -69,7 +69,39 @@ Execute or resume the validation-only screen:
 .venv/bin/python scripts/run_longer_block_frontier.py --execute
 ```
 
-The final result will be written to
-`artifacts/evaluations/phase8_longer_block_rf_frontier.json`. Until that result
-exists, no longer-block candidate has passed and neither the joint frontier nor
-PPO is authorized.
+## Completed validation result
+
+The declaration SHA-256 is
+`3db9bceffd82a7251cff813499a94e5513c40c4edfd1dd0be2e9f197904239e6`.
+The completed result is
+`artifacts/evaluations/phase8_longer_block_rf_frontier.json`, SHA-256
+`80433fc1733bfc5c25be183b0e853d15cb594f03570326c25be3ae5c302052b4`.
+
+Both optical configurations produce the same material density-20 and
+density-30 means:
+
+| Candidate | Density 10 | Density 20 | Density 30 | Survives |
+|---|---:|---:|---:|---|
+| 0.5 ms 16QAM control | `5.24e-61` | `6.464405e-4` | `2.895417e-4` | no |
+| 1.0 ms QPSK | `5.24e-61` | `4.340970e-4` | `1.192608e-4` | no |
+| 1.5 ms QPSK | `5.24e-61` | `3.017842e-4` | `2.594365e-5` | no |
+| 2.0 ms QPSK | `5.24e-61` | `1.723841e-4` | `5.51e-49` | no |
+
+The concentrated receiver changes only the already negligible density-10
+value. At density 30, 1.5 ms is sufficient and 2.0 ms drives the selected
+finite-blocklength risk to the numerical floor. Density 20 remains limiting:
+2.0 ms reduces its control risk by approximately 73.3%, but the resulting mean
+is still 1.724 times the `1e-4` budget.
+
+The frontier therefore has zero survivors. No pair-local contention cell runs,
+because contention and half-duplex loss can only worsen this optimistic bound.
+Training is not authorized and the test split remains unopened.
+
+## Consequence
+
+The declared 0.5--2.0 ms longer-block intervention is beneficial but
+insufficient. The next bounded task should diagnose only the remaining
+density-20 tail under the 2.0 ms QPSK candidate and determine whether any
+deadline-edge blocklength up to 2.475 ms per attempt could close the remaining
+1.724-fold gap. That diagnosis must be frozen before adding a candidate; the
+completed grid must not be expanded after observing its result.

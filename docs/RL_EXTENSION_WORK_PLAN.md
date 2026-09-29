@@ -876,7 +876,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        frontier with the existing four-attempt/nine-action contract as the
        next intervention; PPO and the test split remain blocked. See
        `PHASE8_PROPAGATION_TAIL_DECOMPOSITION.md`.
-     - [ ] Complete the 300 B / 10 ms / `1e-4` longer-block RF frontier before
+     - [x] Complete the 300 B / 10 ms / `1e-4` longer-block RF frontier before
        any joint frontier or PPO training. See
        `PHASE8_LONGER_BLOCK_RF_FRONTIER.md`.
        - [x] Freeze the 0.5, 1.0, 1.5, and 2.0 ms per-attempt candidates,
@@ -886,9 +886,17 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        - [x] Implement fail-closed structural validation plus a candidate-level
          resumable propagation-only executor without changing the nine-action,
          four-attempt policy contract.
-       - [ ] Execute the frozen propagation screen, record the shortest
+       - [x] Execute the frozen propagation screen, record the shortest
          survivor if one exists, and authorize only that candidate for the
-         pair-local contention and half-duplex frontier.
+         pair-local contention and half-duplex frontier. No candidate survives.
+         The 2.0 ms QPSK row reduces the density-20 lower bound from
+         `6.464405e-4` to `1.723841e-4` and makes density 30 pass, but density
+         20 remains 1.724 times over budget. No joint cell or PPO run is
+         authorized.
+     - [ ] Diagnose the residual density-20 tail for the 2.0 ms QPSK candidate
+       and predeclare a deadline-edge blocklength threshold screen bounded by
+       2.475 ms per attempt before adding any new candidate or changing the
+       physical intervention.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1220,7 +1228,11 @@ passes density 10 but fails densities 20 and 30, including headline bounds of
 run, the test split remains closed, and PPO remains unauthorized. The
 propagation-tail decomposition now localizes effectively all failed lower-bound
 risk to a handful of actor-usable, RF-NLOS rows where VLC is geometrically
-unavailable and the optimistic oracle already selects `RF-4`. The immediate
-next task is to predeclare and structurally validate the bounded 300 B / 10 ms /
-`1e-4` longer-block RF frontier at 0.5, 1.0, 1.5, and 2.0 ms per attempt before
-evaluating any new propagation, contention, or PPO result.
+unavailable and the optimistic oracle already selects `RF-4`. The bounded 300
+B / 10 ms / `1e-4` longer-block RF frontier is now complete. It monotonically
+improves the propagation bound and makes density 30 pass from 1.5 ms onward,
+but even the 2.0 ms candidate leaves density 20 at `1.723841e-4`. The immediate
+next task is a validation-only decomposition of that remaining density-20 tail
+plus a predeclared deadline-edge threshold screen capped at 2.475 ms per
+attempt. No joint contention experiment or PPO run is authorized unless that
+necessary condition passes.
