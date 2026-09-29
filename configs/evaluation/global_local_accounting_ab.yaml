@@ -1,0 +1,61 @@
+schema: "hybrid-rf-vlc-rl.global-local-accounting-ab-declaration.v1"
+frozen_date: "2026-09-29"
+
+objective:
+  payload_bytes: 300
+  deadlines_s: [0.003, 0.010]
+  miss_budget: 0.0001
+  required_split: "validation"
+  interpretation: "two matched global-versus-local accounting comparisons; not a 3 ms versus 10 ms comparison"
+
+evidence:
+  three_ms_source:
+    path: "configs/evaluation/pair_local_system_feasibility_frontier.yaml"
+    sha256: "c6499afeb4d7ecf15c09bbe3006dd08183a4d3ce97c1e524d0e8ba93356c3cf2"
+  ten_ms_source:
+    path: "configs/evaluation/exploratory_joint_override.yaml"
+    sha256: "1be2914d82183b3e8c81e9cf17f189fce8b62bcf7045ab4d7a164507fbef4c7c"
+  window_source:
+    path: "artifacts/evaluations/phase8_state_regime_audit.json"
+    sha256: "35b240c2fc58b46f02999d225663b6a91803509309cf098b4927e19aa6a7b2a7"
+  environment_seed: 20260728
+  actor_used: false
+  checkpoint_used: false
+
+design:
+  actions: ["VLC", "RF-1", "RF-2", "RF-3", "RF-4", "DUP-1", "DUP-2", "DUP-3", "DUP-4"]
+  fallback_action: "DUP-4"
+  sensing_band: "nominal"
+  legacy_global_sensed_fraction: 1.0
+  pair_local_contention_radius_m: 200.0
+  identical_joint_actions: true
+  identical_channel_truth: true
+  conditional_risk_only: true
+  usable_and_all_row_views: true
+
+profiles:
+  three_ms:
+    profile_id: "3ms-historical-1x-wide-nominal-siso"
+    deadline_s: 0.003
+    rf_capacity_name: "rf-capacity-1x"
+    subchannels: 2
+    candidate_resources: 400
+    optical_configuration: "wide-60deg"
+    receive_profile: "siso"
+    historical_capacity_caveat: "the historical 2-subchannel/400-resource point is preserved only for an accounting A/B and was superseded by the full-carrier mapping"
+  ten_ms:
+    profile_id: "10ms-qpsk2ms-4x-wide-rx2mrc-nominal"
+    deadline_s: 0.010
+    rf_capacity_name: "rf-capacity-4x"
+    subchannels: 4
+    candidate_resources: 800
+    optical_configuration: "wide-60deg"
+    receive_profile: "rx2-mrc__independent-ideal__integrated-zero-loss"
+
+execution:
+  validation_windows: 9
+  expected_profiles: 2
+  expected_cells: 18
+  no_training: true
+  no_test_split: true
+  output_path: "artifacts/evaluations/phase8_global_local_accounting_ab.json"
