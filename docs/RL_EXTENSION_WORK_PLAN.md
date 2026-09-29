@@ -1208,6 +1208,10 @@ declaration, physical model, and resumable executor are complete. The bounded
 propagation screen eliminates all ten receive profiles: every MRC profile
 passes density 10 but fails densities 20 and 30, including headline bounds of
 `6.464405e-4` and `2.895417e-4`. The survivor grid is empty, so no joint cells
-run, the test split remains closed, and PPO remains unauthorized. The immediate
-next task is a bounded propagation-tail decomposition to identify which
-physical mechanism must change before freezing another feasibility frontier.
+run, the test split remains closed, and PPO remains unauthorized. The
+propagation-tail decomposition now localizes effectively all failed lower-bound
+risk to a handful of actor-usable, RF-NLOS rows where VLC is geometrically
+unavailable and the optimistic oracle already selects `RF-4`. The immediate
+next task is to predeclare and structurally validate the bounded 300 B / 10 ms /
+`1e-4` longer-block RF frontier at 0.5, 1.0, 1.5, and 2.0 ms per attempt before
+evaluating any new propagation, contention, or PPO result.

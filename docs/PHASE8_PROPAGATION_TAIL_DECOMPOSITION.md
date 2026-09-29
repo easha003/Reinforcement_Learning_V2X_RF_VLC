@@ -37,7 +37,7 @@ The bounded replay exactly reproduces the four source-screen rows:
 Every reproduction difference is zero at the persisted precision. The result
 is stored in
 `artifacts/evaluations/phase8_propagation_tail_decomposition.json`, SHA-256
-`eb3bb2fe9b6d2d4f5bf44057146344cbea38c41522ea3831950c06a2f58d01e7`.
+`fc7141c10877f841d24e16a18adbf306a7e273ceb525c9ffed21fdd7ac087e0f`.
 
 ## Density 20
 
