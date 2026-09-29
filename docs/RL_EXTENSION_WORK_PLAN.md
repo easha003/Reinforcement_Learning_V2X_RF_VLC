@@ -893,7 +893,7 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
          `6.464405e-4` to `1.723841e-4` and makes density 30 pass, but density
          20 remains 1.724 times over budget. No joint cell or PPO run is
          authorized.
-     - [ ] Diagnose the residual density-20 tail for the 2.0 ms QPSK candidate
+     - [x] Diagnose the residual density-20 tail for the 2.0 ms QPSK candidate
        and complete the deadline-edge blocklength threshold screen bounded by
        2.475 ms per attempt before adding any new candidate or changing the
        physical intervention. See
@@ -904,10 +904,16 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        - [x] Implement fail-closed source reproduction, residual-tail
          decomposition, resumable optical-profile execution, and explicit
          continuous-deadline versus full-slot-grid decisions.
-       - [ ] Execute both frozen optical profiles, record the exact first
+       - [x] Execute both frozen optical profiles, record the exact first
          passing threshold if it exists, and select the next physical step
          without opening the joint frontier unless the current slot grid also
-         passes.
+         passes. No threshold exists: the 2.475 ms continuous boundary reaches
+         only `1.294405e-4` (1.294 times budget). Four of 23,204 transitions
+         carry effectively all source risk; each is actor-usable, selects
+         `RF-4`, is RF NLOS, and has occluded/out-of-FOV VLC. The next minimal
+         task is a predeclared propagation-only screen combining the
+         grid-realizable 2.0 ms QPSK block with all three already-frozen
+         integrated zero-loss MRC correlation profiles.
 5. [x] Apply the reliability curriculum:
 
    ```text
@@ -1242,8 +1248,11 @@ risk to a handful of actor-usable, RF-NLOS rows where VLC is geometrically
 unavailable and the optimistic oracle already selects `RF-4`. The bounded 300
 B / 10 ms / `1e-4` longer-block RF frontier is now complete. It monotonically
 improves the propagation bound and makes density 30 pass from 1.5 ms onward,
-but even the 2.0 ms candidate leaves density 20 at `1.723841e-4`. The immediate
-next task is a validation-only decomposition of that remaining density-20 tail
-plus a predeclared deadline-edge threshold screen capped at 2.475 ms per
-attempt. No joint contention experiment or PPO run is authorized unless that
-necessary condition passes.
+but even the 2.0 ms candidate leaves density 20 at `1.723841e-4`. The
+deadline-edge threshold screen is now complete: its best possible continuous
+mean at 2.475 ms is `1.294405e-4`, so no threshold passes and the current
+full-slot grid also remains infeasible. The next minimal task is to predeclare
+a combined 2.0 ms QPSK plus integrated zero-loss two-branch MRC propagation
+screen across all three previously frozen correlation levels. No joint
+contention experiment or PPO run is authorized unless that necessary condition
+passes.

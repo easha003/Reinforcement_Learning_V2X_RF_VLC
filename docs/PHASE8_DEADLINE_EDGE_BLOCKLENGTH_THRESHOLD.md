@@ -1,6 +1,7 @@
 # Phase 8 deadline-edge blocklength threshold
 
-Status: declared and implemented; validation execution pending
+Status: completed; the continuous deadline boundary fails, so the current
+full-slot grid, joint frontier, and PPO remain blocked
 
 ## Purpose
 
@@ -73,3 +74,48 @@ result is declared at
   the pair-local joint contention frontier.
 - This experiment never authorizes PPO directly and never opens the test
   split.
+
+## Completed validation result
+
+The declaration SHA-256 is
+`c0d257353d5582ec9958727e2806a44b6fcd97e4068a0cf5687253b402f3607e`.
+The completed result SHA-256 is
+`6527d511a62b73da7f1a70617b471365ad03f131522409a00e2d96df60913a62`.
+Both optical profiles exactly reproduce the 2.0 ms source mean and produce
+identical threshold results over 23,204 density-20 transitions:
+
+| Airtime per attempt | Channel uses | Mean optimistic lower bound | Budget multiple |
+|---:|---:|---:|---:|
+| 2.000 ms | 9,676 | `1.723841e-4` | 1.724 |
+| 2.125 ms | 10,281 | `1.723833e-4` | 1.724 |
+| 2.250 ms | 10,886 | `1.713567e-4` | 1.714 |
+| 2.375 ms | 11,491 | `1.433501e-4` | 1.434 |
+| 2.475 ms | 11,975 | `1.294405e-4` | 1.294 |
+
+The 2.475 ms edge lowers the 2.0 ms mean by approximately 24.9%, but it still
+exceeds the miss budget by approximately 29.4%. There is therefore no passing
+integer channel-use threshold inside the continuous deadline interval.
+
+The control decomposition also sharpens the diagnosis. Four of 23,204 rows
+(`0.0172384%`) contribute more than 99.999999995% of the complete risk sum.
+They lie in the actor-usable, `RF-4`, RF-NLOS group for which VLC is
+geometrically unavailable because it is occluded and outside the receiver
+field of view. The 2.0 ms aggregate risk sum is effectively 4.0; extending to
+the deadline edge reduces it only to 3.00354. Optical-profile width cannot
+repair these rows because VLC is unavailable in both configurations.
+
+## Consequence and next bounded step
+
+The failed continuous boundary rules out slot granularity alone as the fix:
+even a hypothetical fractional-slot implementation at 2.475 ms would miss the
+target. A fifth current slot and extra full-length retransmission also do not
+fit the deadline. The next minimal experiment should therefore combine the
+grid-realizable 2.0 ms QPSK candidate with the already-declared integrated
+zero-loss two-branch MRC receive profiles. It should retain all three frozen
+branch-correlation levels rather than selecting the empirically best prior
+profile after observing its result.
+
+That combined receiver-loss/blocklength experiment remains a
+propagation-only necessary-condition screen. It must be predeclared, and no
+joint contention frontier or PPO training may begin unless a frozen profile
+passes the `1e-4` target.
