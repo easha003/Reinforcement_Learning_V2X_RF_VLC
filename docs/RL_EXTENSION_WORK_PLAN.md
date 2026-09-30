@@ -763,6 +763,19 @@ Train reproducible policies gradually, selecting checkpoints by validation relia
        Pre-migration PPO checkpoints are analysis-only and must not be resumed
        for optimization; any later learner starts fresh after the corrected
        feasibility gate passes.
+     - [x] Isolate the effect of the accounting migration with matched
+       fixed-action A/B replays at both 3 ms and 10 ms. All 18 declared cells
+       reuse identical joint actions, RF/VLC truth, validation windows, and
+       environment seed; only the legacy global/population-mean versus current
+       pair-local/endpoint-specific accounting changes. The usable-row VLC
+       negative controls are exact. Pair-local accounting reduces campaign
+       mean conditional risk by 15.72%--31.50% across RF-involving 3 ms cells
+       and 15.85%--29.35% across RF-involving 10 ms cells. It removes
+       84.3%--85.4% of global utilization attributed outside the typical focal
+       domain while correctly redistributing endpoint-specific risk rather
+       than lowering every row. This validates the migration but is not a
+       `1e-4` feasibility result. See
+       `PHASE8_GLOBAL_LOCAL_ACCOUNTING_AB.md`.
    - [x] Predeclare and execute a bounded system-feasibility frontier around
      the certificate-aware pair-local joint evaluator. Vary explicit RF
      capacity, declared sensing band,
@@ -1314,5 +1327,10 @@ characterization is complete at the maximum already-declared full-carrier
 capacity. The nominal realizable worst-density mean is `1.303173e-2`, about
 130.32 times the target, and density 20 is certified infeasible. Exploratory
 PPO remains authorized only to study hybrid-policy learning and oracle gap, not
-to claim `1e-4`. The immediate task is to freeze that exact nominal training
-profile and pass a bounded smoke campaign while the test split stays closed.
+to claim `1e-4`. A matched 18-cell global-versus-local accounting A/B is also
+complete at both 3 ms and 10 ms. Its exact VLC negative controls and
+15.72%--31.50% (3 ms) and 15.85%--29.35% (10 ms) RF-involving risk reductions
+confirm that the pair-local/endpoint correction materially benefits the hybrid
+system, but do not change the feasibility claim. The immediate task is to
+freeze the exact nominal 10 ms training profile and pass a bounded smoke
+campaign while the test split stays closed.
