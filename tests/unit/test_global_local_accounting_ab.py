@@ -133,10 +133,14 @@ def test_structural_dry_run_opens_no_channel_frames_or_test_data() -> None:
         declaration.three_ms_source.path,
         declaration.ten_ms_source.path,
         declaration.window_source.path,
+        PROJECT_ROOT
+        / "artifacts"
+        / "evaluations"
+        / "phase8_combined_receiver_block_frontier.json",
     )
     if not all(path.is_file() for path in required):
         pytest.skip("frozen evidence is not present in this checkout")
-    trace_root = PROJECT_ROOT / "data" / "traces"
+    trace_root = PROJECT_ROOT / "artifacts" / "traces"
     if not trace_root.is_dir():
         pytest.skip("validation traces are not present in this checkout")
 
